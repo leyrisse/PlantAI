@@ -314,3 +314,41 @@ export interface InitialPlantData {
   careGuide?: SpeciesCareGuide;
 }
 
+export interface WeatherLocation {
+  latitude: number;
+  longitude: number;
+  name: string; // e.g. "Curitiba, Paraná, Brasil"
+  type: 'current' | 'manual';
+  savedAt: string;
+}
+
+export interface CurrentWeather {
+  temperature: number; // in Celsius
+  humidity?: number; // in %
+  weatherCode: number;
+  conditionText: string;
+  isDay: boolean;
+  observationTime: string; // Formatted time of measurement
+  gardenInsight: string;
+  sourceAttribution: string;
+}
+
+export interface GeocodingResult {
+  id: number | string;
+  name: string;
+  admin1?: string;
+  country?: string;
+  latitude: number;
+  longitude: number;
+  formattedLabel: string;
+}
+
+export interface AuthState {
+  userId: string | null;
+  isAnonymous: boolean;
+  isLoading: boolean;
+  isConfigured: boolean;
+  error: string | null;
+  retryAuth: () => Promise<void>;
+}
+

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Plant, Environment, PlantCollection, WishListItem, InitialPlantData } from '../types';
+import { formatDisplayDate } from '../utils/dateUtils';
 import {
   Search,
   Filter,
@@ -33,6 +34,9 @@ interface GardenModuleProps {
   onRemoveWishListItem: (id: string) => void;
   onAddToGarden: (initialData: InitialPlantData) => void;
   onNavigateToCamera?: () => void;
+  onLoadDemoPlants?: () => void;
+  currentTemperature?: number | null;
+  onDeletePlant?: (plantId: string) => void;
 }
 
 export const GardenModule: React.FC<GardenModuleProps> = ({
@@ -45,6 +49,9 @@ export const GardenModule: React.FC<GardenModuleProps> = ({
   onRemoveWishListItem,
   onAddToGarden,
   onNavigateToCamera,
+  onLoadDemoPlants,
+  currentTemperature,
+  onDeletePlant,
 }) => {
   // Navigation between Meu Jardim (current plants) and Jardim Futuro (planned plants)
   const [gardenSection, setGardenSection] = useState<'MY_GARDEN' | 'FUTURE_GARDEN'>('MY_GARDEN');
@@ -302,14 +309,59 @@ export const GardenModule: React.FC<GardenModuleProps> = ({
             </div>
           )}
 
-          {/* EMPTY FILTER RESULTS BANNER */}
-          {filteredPlants.length === 0 && (
+          {/* EMPTY GARDEN (NEW VISITOR) OR EMPTY FILTER RESULTS */}
+          {plants.length === 0 ? (
+            <div className="bg-white rounded-3xl p-8 sm:p-12 text-center border border-[#5A5A40]/20 shadow-xs space-y-5 max-w-xl mx-auto my-6 animate-fadeIn">
+              <div className="w-16 h-16 bg-[#F5F5F0] rounded-3xl flex items-center justify-center mx-auto text-[#D4AF37] border border-[#5A5A40]/15 shadow-xs">
+                <Sparkles className="w-8 h-8 text-[#D4AF37]" />
+              </div>
+              <div className="space-y-2">
+                <h3 className="font-serif text-xl sm:text-2xl font-bold text-[#2D3A2D]">
+                  Seu jardim está pronto para começar!
+                </h3>
+                <p className="text-xs text-[#5A5A40] max-w-md mx-auto leading-relaxed">
+                  Você ainda não possui plantas cadastradas. Use a câmera para identificar uma espécie ou cadastre sua primeira planta para iniciar seu histórico de regas e cuidados.
+                </p>
+              </div>
+              <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
+                {onNavigateToCamera && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToCamera}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-[#2D3A2D] hover:bg-[#1f291f] text-[#F5F5F0] text-xs font-bold rounded-xl shadow-md transition-all flex items-center justify-center gap-2 border border-[#D4AF37]/40 cursor-pointer"
+                  >
+                    <Camera className="w-4 h-4 text-[#D4AF37]" />
+                    <span>Identificar com a Câmera</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onOpenNewPlantModal}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-[#F5F5F0] hover:bg-[#eaeae2] text-[#2D3A2D] text-xs font-bold rounded-xl border border-[#5A5A40]/30 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4 text-[#A68069]" />
+                  <span>Cadastrar Planta</span>
+                </button>
+              </div>
+              {onLoadDemoPlants && (
+                <div className="pt-4 border-t border-[#5A5A40]/15">
+                  <button
+                    type="button"
+                    onClick={onLoadDemoPlants}
+                    className="text-[11px] text-[#5A5A40] hover:text-[#2D3A2D] underline font-medium transition-colors cursor-pointer"
+                  >
+                    Ou clique aqui para carregar plantas de demonstração (Modo Demo)
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : filteredPlants.length === 0 ? (
             <div className="bg-white rounded-3xl p-8 text-center border border-[#5A5A40]/20 shadow-xs space-y-4">
               <div className="w-12 h-12 bg-[#F5F5F0] rounded-2xl flex items-center justify-center mx-auto text-[#A68069]">
                 <Filter className="w-6 h-6" />
               </div>
               <div>
-                <h4 className="font-serif text-lg font-bold text-[#2D3A2D]">Nenhuma planta encontrada no Meu Jardim</h4>
+                <h4 className="font-serif text-lg font-bold text-[#2D3A2D]">Nenhuma planta encontrada com esses filtros</h4>
                 <p className="text-xs text-[#5A5A40] mt-1">
                   Tente alterar os termos de busca, selecionar outro ambiente ou limpar a seleção atual.
                 </p>
@@ -325,7 +377,7 @@ export const GardenModule: React.FC<GardenModuleProps> = ({
                 Limpar Filtros
               </button>
             </div>
-          )}
+          ) : null}
 
           {/* VIEW MODE 1: JARDIM VIRTUAL (DEFAULT) */}
           {viewMode === 'VIRTUAL' && filteredPlants.length > 0 && (
@@ -352,7 +404,9 @@ export const GardenModule: React.FC<GardenModuleProps> = ({
                 <div className="flex items-center gap-2 bg-[#1b261b]/80 border border-[#D4AF37]/40 px-3 py-1.5 rounded-2xl backdrop-blur-md shadow-md">
                   <Sun className="w-4 h-4 text-[#D4AF37]" />
                   <span className="text-xs font-mono text-[#D4AF37] font-bold">
-                    Luz Solar Ativa • 24°C
+                    {currentTemperature !== undefined && currentTemperature !== null
+                      ? `Luz Solar Ativa • ${currentTemperature}°C`
+                      : 'Luz Solar Ativa'}
                   </span>
                 </div>
               </div>
@@ -396,6 +450,20 @@ export const GardenModule: React.FC<GardenModuleProps> = ({
                               <span className="absolute bottom-1.5 left-1.5 bg-[#182318]/90 text-[#D4AF37] text-[10px] font-mono px-2 py-0.5 rounded-md font-bold border border-[#D4AF37]/40 shadow-xs">
                                 {plant.rgDigital}
                               </span>
+                              {onDeletePlant && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDeletePlant(plant.id);
+                                  }}
+                                  className="absolute top-1.5 right-1.5 p-1 bg-[#182318]/90 hover:bg-red-600 text-stone-300 hover:text-white rounded-md transition-all cursor-pointer opacity-90 sm:opacity-0 group-hover:opacity-100 shadow-xs border border-[#5A5A40]/40"
+                                  title={`Excluir ${plant.name}`}
+                                  aria-label={`Excluir ${plant.name}`}
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
                             </div>
 
                             <div>
@@ -465,7 +533,11 @@ export const GardenModule: React.FC<GardenModuleProps> = ({
                       </div>
                       <div className="flex items-center justify-between">
                         <span>Última Rega:</span>
-                        <strong className="text-[#2D3A2D]">{plant.careSchedule.lastWatered}</strong>
+                        <strong className="text-[#2D3A2D]">{formatDisplayDate(plant.careSchedule.lastWatered)}</strong>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span>Última Adubação:</span>
+                        <strong className="text-[#2D3A2D]">{formatDisplayDate(plant.careSchedule.lastFertilized)}</strong>
                       </div>
                     </div>
 
@@ -482,9 +554,25 @@ export const GardenModule: React.FC<GardenModuleProps> = ({
                         ))}
                       </div>
 
-                      <span className="font-bold text-[#A68069] group-hover:underline">
-                        Ver Detalhes →
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {onDeletePlant && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeletePlant(plant.id);
+                            }}
+                            className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                            title={`Excluir ${plant.name}`}
+                            aria-label={`Excluir ${plant.name}`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <span className="font-bold text-[#A68069] group-hover:underline">
+                          Ver Detalhes →
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -529,10 +617,28 @@ export const GardenModule: React.FC<GardenModuleProps> = ({
                         <td className="p-4 font-mono text-[#A68069] font-bold">{plant.rgDigital}</td>
                         <td className="p-4 font-medium">{plant.environmentName}</td>
                         <td className="p-4 font-medium">{plant.collectionName || '—'}</td>
-                        <td className="p-4 font-medium">{plant.careSchedule.lastWatered}</td>
+                        <td className="p-4 font-medium">{formatDisplayDate(plant.careSchedule.lastWatered)}</td>
                         <td className="p-4 font-medium">{plant.tutors.map((t) => t.name).join(', ')}</td>
-                        <td className="p-4 text-right font-bold text-[#A68069]">
-                          Abrir Perfil →
+                        <td className="p-4 text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            {onDeletePlant && (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onDeletePlant(plant.id);
+                                }}
+                                className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                                title={`Excluir ${plant.name}`}
+                                aria-label={`Excluir ${plant.name}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <span className="font-bold text-[#A68069] group-hover:underline cursor-pointer">
+                              Abrir Perfil →
+                            </span>
+                          </div>
                         </td>
                       </tr>
                     ))}

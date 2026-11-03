@@ -6,7 +6,7 @@ export const INITIAL_ENVIRONMENTS: Environment[] = [
     name: 'Sala de Estar',
     iconName: 'Sofa',
     description: 'Luz indireta e filtrada pela janela principal.',
-    plantCount: 3,
+    plantCount: 0,
     coverImage: 'https://images.unsplash.com/photo-1545241047-6083a3684587?auto=format&fit=crop&w=800&q=80',
   },
   {
@@ -14,7 +14,7 @@ export const INITIAL_ENVIRONMENTS: Environment[] = [
     name: 'Varanda Ensolarada',
     iconName: 'Sun',
     description: 'Espaço aberto com insolação da manhã e ventilação abundante.',
-    plantCount: 2,
+    plantCount: 0,
     coverImage: 'https://images.unsplash.com/photo-1512496015851-a90fb38ba796?auto=format&fit=crop&w=800&q=80',
   },
   {
@@ -22,7 +22,7 @@ export const INITIAL_ENVIRONMENTS: Environment[] = [
     name: 'Escritório Verde',
     iconName: 'Laptop',
     description: 'Ambiente climatizado com luz de LED para plantas.',
-    plantCount: 1,
+    plantCount: 0,
     coverImage: 'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=800&q=80',
   },
 ];
@@ -33,21 +33,21 @@ export const INITIAL_COLLECTIONS: PlantCollection[] = [
     name: 'Aráceas Majestosas',
     color: 'emerald',
     description: 'Monsteras, Filodendros e Antheriums com folhagens exuberantes.',
-    plantCount: 3,
+    plantCount: 0,
   },
   {
     id: 'col-raras',
     name: 'Coleção Raridades',
     color: 'amber',
     description: 'Mudas raras com varietações e brotações especiais.',
-    plantCount: 1,
+    plantCount: 0,
   },
   {
     id: 'col-resgatadas',
     name: 'Plantas Resgatadas',
     color: 'purple',
     description: 'Plantas órfãs ou recuperadas de descarte com histórias de superação.',
-    plantCount: 2,
+    plantCount: 0,
   },
 ];
 
@@ -266,7 +266,7 @@ export const INITIAL_PLANTS: Plant[] = [
     timeline: [
       {
         id: 'evt-rosa-1',
-        date: '202 x-09-15',
+        date: '2022-09-15',
         type: 'MILESTONE',
         title: 'Cadastro pelo Tutor Original (Marcos)',
         description: 'Rosa foi cultivada com muito carinho e floriu por 3 primaveras consecutivas.',

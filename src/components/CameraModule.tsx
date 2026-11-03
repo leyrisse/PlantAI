@@ -253,14 +253,25 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
         }),
       });
 
-      const identifyData = await identifyRes.json();
+      let identifyData: any = null;
+      try {
+        identifyData = await identifyRes.json();
+      } catch {
+        throw new Error(
+          `O servidor retornou uma resposta inválida (Status HTTP ${identifyRes.status}). Verifique se o backend está implantado e se PLANTNET_API_KEY está configurada.`
+        );
+      }
+
       if (!identifyRes.ok) {
-        throw new Error(identifyData.error || 'Não foi possível identificar a planta com certeza.');
+        throw new Error(identifyData?.error || 'Não foi possível identificar a planta com certeza.');
       }
 
       const result = identifyData as PlantNetIdentificationResponse;
       if (!result.candidates || result.candidates.length === 0) {
-        throw new Error('A espécie não foi identificada com certeza. Tente novamente com uma foto mais nítida ou em outro ângulo.');
+        throw new Error(
+          result.message ||
+            'A espécie não foi identificada com certeza. Tente novamente com uma foto mais nítida, com boa iluminação e foco direto na folha ou flor.'
+        );
       }
 
       // Automatically select the best candidate (highest score)
@@ -284,8 +295,10 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
         });
 
         if (careRes.ok) {
-          const careData = await careRes.json();
-          guide = careData.data as SpeciesCareGuide;
+          const careData = await careRes.json().catch(() => null);
+          if (careData?.data) {
+            guide = careData.data as SpeciesCareGuide;
+          }
         }
       } catch (careErr) {
         console.warn('Erro secundário ao obter guia de cultivo:', careErr);

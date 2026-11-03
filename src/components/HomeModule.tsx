@@ -1,7 +1,7 @@
 import React from 'react';
-import { Plant, CareTaskType } from '../types';
+import { Plant, CareTaskType, WeatherLocation, CurrentWeather } from '../types';
 import { calculateNextCareDate } from '../utils/dateUtils';
-import { Calendar, Droplet, Sprout, Scissors, History, QrCode, Heart, ArrowRight, Sun, Info, CalendarHeart } from 'lucide-react';
+import { Calendar, Droplet, Sprout, Scissors, History, QrCode, Heart, ArrowRight, Sun, Info, CalendarHeart, MapPin, Compass } from 'lucide-react';
 
 interface HomeModuleProps {
   plants: Plant[];
@@ -9,6 +9,10 @@ interface HomeModuleProps {
   onSelectPlant: (plant: Plant) => void;
   onNavigateToCare: () => void;
   userRole?: 'HOBBYIST' | 'PRO';
+  location?: WeatherLocation | null;
+  weather?: CurrentWeather | null;
+  isLoadingWeather?: boolean;
+  onOpenWeatherModal?: () => void;
 }
 
 export const HomeModule: React.FC<HomeModuleProps> = ({
@@ -16,6 +20,10 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
   onLogCareTask,
   onSelectPlant,
   onNavigateToCare,
+  location,
+  weather,
+  isLoadingWeather = false,
+  onOpenWeatherModal,
 }) => {
   // Calculate care status for all plants
   const plantCareList = plants.map((plant) => {
@@ -59,10 +67,38 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
           <h2 className="font-serif text-xl sm:text-2xl font-bold tracking-tight text-[#F5F5F0]">
             Bom dia, Guardião do Jardim 🌿
           </h2>
-          <span className="bg-[#5A5A40] text-[#D4AF37] text-xs px-3 py-1 rounded-full border border-[#D4AF37]/30 flex items-center gap-1.5 font-semibold">
-            <Sun className="w-3.5 h-3.5 text-[#D4AF37]" />
-            24°C Curitiba • Clima Favorável para Regas
-          </span>
+          {location && weather ? (
+            <button
+              type="button"
+              onClick={onOpenWeatherModal}
+              className="bg-[#5A5A40] hover:bg-[#484833] text-[#D4AF37] text-xs px-3 py-1 rounded-full border border-[#D4AF37]/30 flex items-center gap-1.5 font-semibold transition-all cursor-pointer shadow-xs group"
+              title="Clique para ver detalhes do clima ou alterar a localização do jardim"
+            >
+              <Sun className="w-3.5 h-3.5 text-[#D4AF37] group-hover:rotate-45 transition-transform" />
+              <span>
+                {weather.temperature}°C {location.name.split(',')[0]} • {weather.conditionText}
+              </span>
+            </button>
+          ) : location && isLoadingWeather ? (
+            <button
+              type="button"
+              onClick={onOpenWeatherModal}
+              className="bg-[#5A5A40] text-[#D4AF37] text-xs px-3 py-1 rounded-full border border-[#D4AF37]/30 flex items-center gap-1.5 font-semibold cursor-pointer animate-pulse"
+            >
+              <Compass className="w-3.5 h-3.5 text-[#D4AF37]" />
+              <span>Carregando clima de {location.name.split(',')[0]}...</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenWeatherModal}
+              className="bg-[#5A5A40]/80 hover:bg-[#5A5A40] text-[#F5F5F0] hover:text-[#D4AF37] text-xs px-3 py-1 rounded-full border border-[#D4AF37]/40 flex items-center gap-1.5 font-semibold transition-all cursor-pointer shadow-xs"
+              title="Defina a localização onde suas plantas ficam para monitorar a temperatura real"
+            >
+              <MapPin className="w-3.5 h-3.5 text-[#D4AF37]" />
+              <span>Definir localização do jardim 📍</span>
+            </button>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -157,9 +193,13 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
 
                   <button
                     onClick={() => onLogCareTask(plant.id, 'FERTILIZE')}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#F5F5F0] hover:bg-[#e6e6de] text-[#2D3A2D] border border-[#5A5A40]/20"
+                    className={`flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      nextFertilize.isOverdue
+                        ? 'bg-[#5A5A40] hover:bg-[#484833] text-[#F5F5F0] shadow-xs'
+                        : 'bg-[#5A5A40]/15 hover:bg-[#5A5A40]/25 text-[#2D3A2D] border border-[#5A5A40]/30'
+                    }`}
                   >
-                    <Sprout className="w-3.5 h-3.5 text-[#5A5A40]" />
+                    <Sprout className="w-3.5 h-3.5" />
                     Adubar
                   </button>
 
@@ -273,6 +313,12 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
                 </div>
               </div>
             ))}
+
+            {memories.length === 0 && (
+              <div className="p-4 rounded-2xl bg-white border border-[#5A5A40]/20 text-center text-xs text-[#5A5A40] italic leading-relaxed">
+                Nenhuma recordação registrada ainda. Marcos históricos (como florações e podas) cadastrados no perfil das suas plantas aparecerão aqui.
+              </div>
+            )}
 
             <div className="bg-[#2D3A2D] rounded-2xl p-5 border border-[#5A5A40] text-xs text-[#F5F5F0] space-y-2">
               <div className="flex items-center gap-2 font-bold text-[#D4AF37]">

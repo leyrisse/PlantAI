@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Plant, CareTaskType, TimelineEvent, Tutor, SpeciesCareGuide } from '../types';
-import { calculateNextCareDate } from '../utils/dateUtils';
+import { calculateNextCareDate, formatDisplayDate, getLocalTodayDateStr } from '../utils/dateUtils';
 import {
   X,
   QrCode,
@@ -26,6 +26,7 @@ import {
   Check,
   Edit3,
   Save,
+  Trash2,
 } from 'lucide-react';
 import { PlantStructuredCare, CareSchedule } from '../types';
 import {
@@ -54,6 +55,7 @@ interface PlantProfileModalProps {
     careSchedule: CareSchedule,
     careGuide?: SpeciesCareGuide
   ) => void;
+  onDeletePlant?: (plantId: string) => void;
 }
 
 export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
@@ -65,6 +67,7 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
   onLogCareTask,
   onUpdatePlantCareGuide,
   onUpdatePlantCare,
+  onDeletePlant,
 }) => {
   const [activeTab, setActiveTab] = useState<'TIMELINE' | 'CARE_GUIDE' | 'TUTORS' | 'TRANSFER'>('CARE_GUIDE');
   const [currentCareGuide, setCurrentCareGuide] = useState<SpeciesCareGuide | undefined>(plant.careGuide);
@@ -200,7 +203,7 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
     if (!eventTitle.trim()) return;
 
     onAddTimelineEvent(plant.id, {
-      date: new Date().toISOString().split('T')[0],
+      date: getLocalTodayDateStr(),
       type: eventType,
       title: eventTitle,
       description: eventDesc,
@@ -221,7 +224,7 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
       name: newTutorName,
       role: newTutorRole,
       avatar: `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=200&q=80`,
-      joinedDate: new Date().toISOString().split('T')[0],
+      joinedDate: getLocalTodayDateStr(),
     });
 
     setNewTutorName('');
@@ -248,13 +251,27 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
           />
           <div className="absolute inset-0 bg-gradient-to-t from-[#2D3A2D] via-[#2D3A2D]/40 to-transparent" />
 
-          {/* Close button */}
-          <button
-            onClick={onClose}
-            className="absolute top-4 right-4 bg-[#2D3A2D]/80 hover:bg-[#2D3A2D] text-[#F5F5F0] p-2 rounded-full border border-[#5A5A40] transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          {/* Top action buttons: Delete and Close */}
+          <div className="absolute top-4 right-4 flex items-center gap-2">
+            {onDeletePlant && (
+              <button
+                type="button"
+                onClick={() => onDeletePlant(plant.id)}
+                className="bg-red-950/70 hover:bg-red-900 text-red-200 hover:text-white px-3 py-1.5 rounded-full border border-red-500/40 transition-colors flex items-center gap-1.5 text-xs font-bold backdrop-blur-xs cursor-pointer shadow-xs"
+                title="Excluir planta do jardim"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                <span className="hidden sm:inline">Excluir</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="bg-[#2D3A2D]/80 hover:bg-[#2D3A2D] text-[#F5F5F0] p-2 rounded-full border border-[#5A5A40] transition-colors cursor-pointer"
+              aria-label="Fechar"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
 
           {/* Plant Identity Title Overlay */}
           <div className="absolute bottom-6 left-6 right-6 flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -587,6 +604,11 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
                         </div>
                       </div>
 
+                      <div className="flex items-center justify-between text-[11px] text-sky-900 bg-sky-50/80 px-3 py-1.5 rounded-xl border border-sky-200/60 font-medium">
+                        <span>Última rega: <strong>{formatDisplayDate(plant.careSchedule?.lastWatered)}</strong></span>
+                        <span>Próxima: <strong>{calculateNextCareDate(plant.careSchedule?.lastWatered, plant.careSchedule?.waterFrequencyDays).statusText}</strong></span>
+                      </div>
+
                       <div className="p-3 bg-sky-50/70 rounded-2xl border border-sky-100 space-y-1 text-xs">
                         <span className="text-[11px] font-bold text-sky-900 block">
                           Como verificar a umidade do solo:
@@ -638,6 +660,11 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
                               : FERTILIZING_FREQUENCY_OPTIONS.find((opt) => opt.id === structuredCare.fertilizerFrequency)?.label || structuredCare.fertilizerFrequency}
                           </span>
                         </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-emerald-900 bg-emerald-50/80 px-3 py-1.5 rounded-xl border border-emerald-200/60 font-medium">
+                        <span>Última adubação: <strong>{formatDisplayDate(plant.careSchedule?.lastFertilized)}</strong></span>
+                        <span>Próxima: <strong>{calculateNextCareDate(plant.careSchedule?.lastFertilized, plant.careSchedule?.fertilizeFrequencyDays).statusText}</strong></span>
                       </div>
 
                       <div className="p-3 bg-emerald-50/70 rounded-2xl border border-emerald-100 text-xs space-y-1">
@@ -971,6 +998,23 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
           )}
 
         </div>
+
+        {/* Footer with Delete Danger Zone */}
+        {onDeletePlant && (
+          <div className="p-4 sm:p-5 bg-stone-50 border-t border-stone-200 rounded-b-3xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-stone-500">
+            <span className="font-mono text-stone-600">
+              RG Digital: <strong className="text-[#2D3A2D]">{plant.rgDigital}</strong>
+            </span>
+            <button
+              type="button"
+              onClick={() => onDeletePlant(plant.id)}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50 px-3.5 py-1.5 rounded-xl border border-red-200 font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Excluir Planta do Jardim</span>
+            </button>
+          </div>
+        )}
 
       </div>
     </div>

@@ -18,6 +18,7 @@ import {
 } from '../utils/careUtils';
 import { PlantCareFormFields } from './PlantCareFormFields';
 import { SpeciesCareAccordion } from './SpeciesCareAccordion';
+import { getLocalTodayDateStr } from '../utils/dateUtils';
 import {
   X,
   Sparkles,
@@ -245,10 +246,17 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
         }),
       });
 
-      const data = await response.json();
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(
+          `O servidor retornou uma resposta inesperada (Status HTTP ${response.status}). Verifique se o backend está ativo e se a chave de identificação está configurada.`
+        );
+      }
 
       if (!response.ok) {
-        throw new Error(data.error || 'Não foi possível identificar a planta. Tente novamente com outra foto.');
+        throw new Error(data?.error || 'Não foi possível identificar a planta. Tente novamente com outra foto.');
       }
 
       const result = data as PlantNetIdentificationResponse;
@@ -322,9 +330,17 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
         }),
       });
 
-      const data = await response.json();
+      let data: any = null;
+      try {
+        data = await response.json();
+      } catch {
+        throw new Error(
+          `O servidor retornou uma resposta inválida (Status HTTP ${response.status}) ao obter o guia da espécie.`
+        );
+      }
+
       if (!response.ok) {
-        throw new Error(data.error || 'Não foi possível carregar as orientações da espécie.');
+        throw new Error(data?.error || 'Não foi possível carregar as orientações da espécie.');
       }
 
       const guide = data.data as SpeciesCareGuide;
@@ -384,7 +400,7 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
       const selectedEnv = environments.find((env) => env.id === envId);
       const generatedId = `plant-${Date.now()}`;
       const generatedCode = `JRD-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
-      const todayStr = new Date().toISOString().split('T')[0];
+      const todayStr = getLocalTodayDateStr();
 
       const wateringDays = getWateringDays(structuredCare.wateringFrequency, structuredCare.customWateringDays);
       const fertilizeDays = getFertilizerDays(structuredCare.fertilizerFrequency, structuredCare.customFertilizerDays);
