@@ -254,11 +254,13 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
       });
 
       let identifyData: any = null;
+      let rawText = '';
       try {
-        identifyData = await identifyRes.json();
+        rawText = await identifyRes.text();
+        identifyData = JSON.parse(rawText);
       } catch {
         throw new Error(
-          `O servidor retornou uma resposta inválida (Status HTTP ${identifyRes.status}). Verifique se o backend está implantado e se PLANTNET_API_KEY está configurada.`
+          `O servidor retornou uma resposta não-JSON (Status HTTP ${identifyRes.status}): ${rawText.slice(0, 180) || 'Sem conteúdo'}`
         );
       }
 

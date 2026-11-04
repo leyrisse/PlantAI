@@ -247,11 +247,13 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
       });
 
       let data: any = null;
+      let rawText = '';
       try {
-        data = await response.json();
+        rawText = await response.text();
+        data = JSON.parse(rawText);
       } catch {
         throw new Error(
-          `O servidor retornou uma resposta inesperada (Status HTTP ${response.status}). Verifique se o backend está ativo e se a chave de identificação está configurada.`
+          `O servidor retornou uma resposta não-JSON (Status HTTP ${response.status}): ${rawText.slice(0, 180) || 'Sem conteúdo'}`
         );
       }
 
