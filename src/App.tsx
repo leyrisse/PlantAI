@@ -542,6 +542,15 @@ export default function App() {
   };
 
   const handleSaveNewPlant = async (newPlant: Plant) => {
+    // Prevent duplicate entries
+    if (plants.some((p) => p.id === newPlant.id || p.rgDigital === newPlant.rgDigital)) {
+      showToast(`ℹ️ "${newPlant.name}" já está cadastrada no seu jardim.`);
+      setIsNewPlantModalOpen(false);
+      setPendingPlantInitialData(null);
+      setActiveTab('GARDEN');
+      return;
+    }
+
     try {
       const result = await createUserPlant(newPlant, auth.userId);
       if (!result.success) {
@@ -551,16 +560,27 @@ export default function App() {
 
       const plantToKeep = result.data || newPlant;
       setPlants((prev) => {
+        if (prev.some((p) => p.id === plantToKeep.id || p.rgDigital === plantToKeep.rgDigital)) {
+          return prev;
+        }
         const updated = [plantToKeep, ...prev];
         saveLocalPlants(updated, auth.userId);
         return updated;
       });
 
       setIsNewPlantModalOpen(false);
-      showToast(`🌿 "${plantToKeep.name}" adicionada ao seu jardim com sucesso!`);
+      setPendingPlantInitialData(null);
+      setActiveTab('GARDEN');
 
-      if (result.isTableMissing) {
+      if (result.savedInSupabase) {
+        showToast(`🌿 "${plantToKeep.name}" adicionada ao jardim e sincronizada no Supabase!`);
+      } else if (result.isTableMissing) {
         setIsTableMissing(true);
+        showToast(`🌿 "${plantToKeep.name}" adicionada ao jardim (armazenada localmente — tabela "plants" pendente no Supabase).`);
+      } else if (result.error) {
+        showToast(`🌿 "${plantToKeep.name}" adicionada ao jardim (armazenada localmente — ${result.error}).`);
+      } else {
+        showToast(`🌿 "${plantToKeep.name}" adicionada ao jardim (armazenada localmente).`);
       }
     } catch (err: any) {
       showToast(`❌ Falha ao adicionar planta: ${err?.message || err}`);
@@ -630,7 +650,35 @@ export default function App() {
   };
 
   const handleAddToWishList = (item: WishListItem) => {
-    setWishList((prev) => [item, ...prev]);
+    const today = getLocalTodayDateStr();
+    const fullItem: WishListItem = {
+      id: item.id || `wish-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      scientificName: item.scientificName,
+      popularName: item.popularName,
+      photoUrl: item.photoUrl,
+      addedAt: item.addedAt || today,
+      careGuide: item.careGuide,
+      notes: item.notes,
+    };
+
+    setWishList((prev) => {
+      const exists = prev.some(
+        (w) => w.scientificName.toLowerCase() === fullItem.scientificName.toLowerCase()
+      );
+      if (exists) {
+        showToast(`ℹ️ "${fullItem.popularName || fullItem.scientificName}" já está salva no seu Jardim Futuro!`);
+        return prev;
+      }
+      const updated = [fullItem, ...prev];
+      try {
+        const userKey = getStorageKey(BASE_STORAGE_KEY_WISHLIST, auth.userId);
+        localStorage.setItem(userKey, JSON.stringify(updated));
+      } catch (e) {
+        console.warn('Erro ao salvar lista de desejos:', e);
+      }
+      showToast(`⭐ "${fullItem.popularName || fullItem.scientificName}" adicionada à sua lista de desejos!`);
+      return updated;
+    });
   };
 
   const handleRemoveFromWishList = (id: string) => {
@@ -923,6 +971,10 @@ export default function App() {
           collections={collections}
           onClose={() => {
             setIsNewPlantModalOpen(false);
+            setPendingPlantInitialData(null);
+          }}
+          onSavePlant={(newPlant) => {
+            handleSaveNewPlant(newPlant);
             setPendingPlantInitialData(null);
           }}
           onSave={(newPlant) => {

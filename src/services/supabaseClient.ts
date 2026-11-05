@@ -12,24 +12,74 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 let supabaseInstance: SupabaseClient | null = null;
 let hasLoggedConfigWarning = false;
 
+/**
+ * Normalizes raw Supabase URL inputs from environment variables.
+ * Handles common copy-paste artifacts such as:
+ * - Surrounding quotes ("https://..." or 'https://...')
+ * - Accidental angle brackets (<https://...> or https://<...>)
+ * - Missing protocol (adds https:// if domain provided e.g. "xyz.supabase.co")
+ * - Trailing slashes
+ */
+export function normalizeSupabaseUrl(rawUrl: string): string {
+  let cleaned = (rawUrl || '').trim();
+
+  // Strip surrounding quotes
+  if (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+
+  // Strip surrounding angle brackets <...>
+  if (cleaned.startsWith('<') && cleaned.endsWith('>')) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+
+  // If user entered only domain without protocol, e.g. "abcdef.supabase.co"
+  if (cleaned && !cleaned.startsWith('http://') && !cleaned.startsWith('https://')) {
+    cleaned = `https://${cleaned}`;
+  }
+
+  // Strip trailing slashes
+  cleaned = cleaned.replace(/\/+$/, '');
+
+  return cleaned;
+}
+
+export function normalizeSupabaseKey(rawKey: string): string {
+  let cleaned = (rawKey || '').trim();
+  if (
+    (cleaned.startsWith('"') && cleaned.endsWith('"')) ||
+    (cleaned.startsWith("'") && cleaned.endsWith("'"))
+  ) {
+    cleaned = cleaned.slice(1, -1).trim();
+  }
+  return cleaned;
+}
+
 export function getSupabaseUrl(): string {
-  const url = (
+  const raw = (
     (typeof import.meta !== 'undefined' && import.meta.env?.VITE_SUPABASE_URL) ||
     (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_URL) ||
     ''
-  ).trim();
-  return url;
+  );
+  return normalizeSupabaseUrl(raw);
 }
 
 export function getSupabaseKey(): string {
-  const key = (
+  const raw = (
     (typeof import.meta !== 'undefined' &&
-      (import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY || import.meta.env?.VITE_SUPABASE_ANON_KEY)) ||
+      (import.meta.env?.VITE_SUPABASE_PUBLISHABLE_KEY ||
+       import.meta.env?.VITE_SUPABASE_ANON_KEY ||
+       import.meta.env?.SUPABASE_ANON_KEY)) ||
     (typeof process !== 'undefined' &&
-      (process.env?.VITE_SUPABASE_PUBLISHABLE_KEY || process.env?.VITE_SUPABASE_ANON_KEY)) ||
+      (process.env?.VITE_SUPABASE_PUBLISHABLE_KEY ||
+       process.env?.VITE_SUPABASE_ANON_KEY ||
+       process.env?.SUPABASE_ANON_KEY)) ||
     ''
-  ).trim();
-  return key;
+  );
+  return normalizeSupabaseKey(raw);
 }
 
 export interface SupabaseConfigStatus {
@@ -55,16 +105,6 @@ export function getSupabaseConfigStatus(): SupabaseConfigStatus {
     };
   }
 
-  // Detect accidental entry of Vercel frontend URL
-  if (url.includes('vercel.app') || (typeof window !== 'undefined' && url.includes(window.location.hostname))) {
-    return {
-      isConfigured: true,
-      isValid: false,
-      url,
-      errorMessage: `A variável VITE_SUPABASE_URL está configurada como o domínio da Vercel ("${url}"). Ela deve ser a URL do seu projeto no Supabase (formato: https://<id-projeto>.supabase.co).`,
-    };
-  }
-
   try {
     const parsed = new URL(url);
     if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
@@ -75,12 +115,40 @@ export function getSupabaseConfigStatus(): SupabaseConfigStatus {
         errorMessage: 'A URL do Supabase precisa utilizar o protocolo https://.',
       };
     }
+
+    const host = parsed.hostname.toLowerCase();
+    const isVercelDomain =
+      host.includes('vercel.app') ||
+      host.includes('vercel.dev') ||
+      host.includes('now.sh') ||
+      (typeof window !== 'undefined' && window.location.hostname && host === window.location.hostname.toLowerCase());
+
+    if (isVercelDomain) {
+      return {
+        isConfigured: true,
+        isValid: false,
+        url,
+        errorMessage: `A variável VITE_SUPABASE_URL está configurada com o endereço da Vercel ("${url}"). Ela deve ser a URL do seu projeto no Supabase (formato: https://<id-projeto>.supabase.co, disponível no Supabase em Project Settings > API).`,
+      };
+    }
+
+    const isSupabaseCloud = host.endsWith('.supabase.co');
+    const isLocalDevelopment = host === 'localhost' || host === '127.0.0.1';
+
+    if (!isSupabaseCloud && !isLocalDevelopment) {
+      return {
+        isConfigured: true,
+        isValid: false,
+        url,
+        errorMessage: `A URL configurada ("${url}") não pertence ao Supabase. O domínio do projeto Supabase deve terminar com ".supabase.co" (formato esperado: https://<id-projeto>.supabase.co).`,
+      };
+    }
   } catch {
     return {
       isConfigured: true,
       isValid: false,
       url,
-      errorMessage: 'O formato da URL em VITE_SUPABASE_URL é inválido.',
+      errorMessage: `O formato da URL em VITE_SUPABASE_URL ("${url}") é inválido. Esperado: https://<id-do-projeto>.supabase.co`,
     };
   }
 

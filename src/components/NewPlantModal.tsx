@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import {
   Plant,
   Environment,
+  PlantCollection,
   PlantNetCandidate,
   PlantNetIdentificationResponse,
   SpeciesCareGuide,
@@ -36,17 +37,23 @@ import {
 
 interface NewPlantModalProps {
   environments: Environment[];
+  collections?: PlantCollection[];
   onClose: () => void;
-  onSavePlant: (plant: Plant) => void;
+  onSavePlant?: (plant: Plant) => void;
+  onSave?: (plant: Plant) => void;
   initialData?: InitialPlantData;
+  isOpen?: boolean;
 }
 
 export const NewPlantModal: React.FC<NewPlantModalProps> = ({
   environments,
+  collections = [],
   onClose,
   onSavePlant,
+  onSave,
   initialData,
 }) => {
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [name, setName] = useState(
     initialData?.name || initialData?.popularName || initialData?.scientificName || ''
   );
@@ -457,11 +464,23 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
         careGuide: fetchedCareGuide || undefined,
       };
 
-      onSavePlant(newPlant);
+      setSaveError(null);
+      const saveCallback = onSavePlant || onSave;
+      if (!saveCallback) {
+        const errorMsg = 'Configuração incompleta: nenhuma função de salvamento fornecida ao modal.';
+        console.error(errorMsg);
+        setSaveError(errorMsg);
+        setIsSaving(false);
+        return;
+      }
+
+      saveCallback(newPlant);
+      setIsSaving(false);
       onClose();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Erro ao cadastrar planta:', err);
       setIsSaving(false);
+      setSaveError(err?.message || 'Falha ao cadastrar a planta. Verifique os dados e tente novamente.');
     }
   };
 
@@ -825,6 +844,24 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
               </div>
             </div>
 
+            {/* Save Error Notice */}
+            {saveError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 text-xs text-red-800 animate-fadeIn">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-semibold">Erro ao cadastrar planta</p>
+                  <p className="text-[11px] text-red-700 mt-0.5">{saveError}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSaveError(null)}
+                  className="text-red-500 hover:text-red-800 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Action Buttons: Cadastrar planta (primary) & Alterar (secondary) */}
             <div className="pt-3 border-t border-[#2D3A2D]/15 flex flex-wrap items-center justify-between gap-2">
               <button
@@ -1047,6 +1084,24 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
                 className="w-full bg-[#F5F5F0] border border-[#5A5A40]/30 rounded-2xl p-3 text-xs text-[#2D3A2D] focus:outline-none focus:ring-2 focus:ring-[#A68069]"
               />
             </div>
+
+            {/* Save Error Notice */}
+            {saveError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-2.5 text-xs text-red-800 animate-fadeIn">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-600 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-semibold">Erro ao cadastrar planta</p>
+                  <p className="text-[11px] text-red-700 mt-0.5">{saveError}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSaveError(null)}
+                  className="text-red-500 hover:text-red-800 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
             <div className="pt-4 border-t border-[#5A5A40]/15 flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">

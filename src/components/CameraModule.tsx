@@ -28,12 +28,7 @@ import { SpeciesCareAccordion } from './SpeciesCareAccordion';
 
 interface CameraModuleProps {
   onAddToGarden: (plantData: InitialPlantData) => void;
-  onAddToWishList: (item: {
-    scientificName: string;
-    popularName?: string;
-    photoUrl: string;
-    careGuide?: SpeciesCareGuide;
-  }) => void;
+  onAddToWishList: (item: WishListItem) => void;
   onShowToast: (message: string) => void;
 }
 
@@ -69,6 +64,7 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
 
   // Menu state in Result Screen (button '+')
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isSavedToWishList, setIsSavedToWishList] = useState(false);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const mediaStreamRef = useRef<MediaStream | null>(null);
@@ -326,6 +322,7 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
     setIsMenuOpen(false);
     setIdentifiedResult(null);
     setCapturedPhotoUrl(null);
+    setIsSavedToWishList(false);
     setViewState('CAMERA');
   };
 
@@ -346,17 +343,23 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
     });
   };
 
-  // Action 2: Adicionar à minha lista
+  // Action 2: Adicionar à minha lista (Jardim Futuro)
   const handleAddToWishList = () => {
     if (!identifiedResult || !capturedPhotoUrl) return;
     setIsMenuOpen(false);
 
+    const todayStr = new Date().toISOString().split('T')[0];
     onAddToWishList({
+      id: `wish-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
       scientificName: identifiedResult.scientificName,
       popularName: identifiedResult.popularName,
       photoUrl: capturedPhotoUrl,
+      addedAt: todayStr,
       careGuide: identifiedResult.careGuide,
     });
+
+    setIsSavedToWishList(true);
+    onShowToast(`⭐ "${identifiedResult.popularName || identifiedResult.scientificName}" salva no Jardim Futuro!`);
   };
 
   return (
@@ -626,7 +629,7 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
                   <button
                     type="button"
                     onClick={handleAddToGarden}
-                    className="w-full px-4 py-3 text-left text-xs font-bold hover:bg-[#5A5A40]/50 flex items-center gap-2.5 transition-colors text-[#F5F5F0]"
+                    className="w-full px-4 py-3 text-left text-xs font-bold hover:bg-[#5A5A40]/50 flex items-center gap-2.5 transition-colors text-[#F5F5F0] cursor-pointer"
                   >
                     <Flower2 className="w-4 h-4 text-[#D4AF37]" />
                     <span>Adicionar planta ao jardim</span>
@@ -637,10 +640,19 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
                   <button
                     type="button"
                     onClick={handleAddToWishList}
-                    className="w-full px-4 py-3 text-left text-xs font-bold hover:bg-[#5A5A40]/50 flex items-center gap-2.5 transition-colors text-[#F5F5F0]"
+                    className="w-full px-4 py-3 text-left text-xs font-bold hover:bg-[#5A5A40]/50 flex items-center gap-2.5 transition-colors text-[#F5F5F0] cursor-pointer"
                   >
-                    <BookmarkPlus className="w-4 h-4 text-[#D4AF37]" />
-                    <span>Adicionar à minha lista</span>
+                    {isSavedToWishList ? (
+                      <>
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                        <span className="text-emerald-300">Salva no Jardim Futuro</span>
+                      </>
+                    ) : (
+                      <>
+                        <BookmarkPlus className="w-4 h-4 text-[#D4AF37]" />
+                        <span>Adicionar à minha lista</span>
+                      </>
+                    )}
                   </button>
                 </div>
               )}
@@ -773,7 +785,7 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
               <button
                 type="button"
                 onClick={handleCloseResult}
-                className="px-4 py-2.5 rounded-2xl text-xs font-bold text-[#5A5A40] hover:bg-stone-200 transition-colors"
+                className="px-4 py-2.5 rounded-2xl text-xs font-bold text-[#5A5A40] hover:bg-stone-200 transition-colors cursor-pointer"
               >
                 Voltar à Câmera
               </button>
@@ -782,19 +794,29 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
                 <button
                   type="button"
                   onClick={handleAddToWishList}
-                  className="px-4 py-2.5 bg-white hover:bg-[#F5F5F0] text-[#2D3A2D] font-bold text-xs rounded-2xl border border-[#5A5A40]/30 shadow-2xs transition-colors flex items-center gap-1.5"
+                  disabled={isSavedToWishList}
+                  className="px-4 py-2.5 bg-white hover:bg-[#F5F5F0] disabled:bg-emerald-50 text-[#2D3A2D] font-bold text-xs rounded-2xl border border-[#5A5A40]/30 shadow-2xs transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer disabled:cursor-default"
                 >
-                  <BookmarkPlus className="w-4 h-4 text-[#A68069]" />
-                  Salvar na Minha Lista
+                  {isSavedToWishList ? (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span className="text-emerald-800">Salva no Jardim Futuro</span>
+                    </>
+                  ) : (
+                    <>
+                      <BookmarkPlus className="w-4 h-4 text-[#A68069]" />
+                      <span>Salvar na Minha Lista</span>
+                    </>
+                  )}
                 </button>
 
                 <button
                   type="button"
                   onClick={handleAddToGarden}
-                  className="px-5 py-2.5 bg-[#2D3A2D] hover:bg-[#1f291f] text-[#F5F5F0] font-bold text-xs rounded-2xl shadow-md transition-colors flex items-center gap-1.5 border border-[#D4AF37]/50"
+                  className="px-5 py-2.5 bg-[#2D3A2D] hover:bg-[#1f291f] text-[#F5F5F0] font-bold text-xs rounded-2xl shadow-md transition-all active:scale-95 flex items-center gap-1.5 border border-[#D4AF37]/50 cursor-pointer"
                 >
                   <Flower2 className="w-4 h-4 text-[#D4AF37]" />
-                  Cadastrar no Jardim
+                  <span>Cadastrar no Jardim</span>
                 </button>
               </div>
             </div>

@@ -221,14 +221,15 @@ export interface PlantMutationResult {
 
 /**
  * Persists a new plant to Supabase.
- * Enforces ownership with user_id.
+ * Enforces ownership with user_id, dynamically resolving the user session if needed.
  */
 export async function createUserPlant(plant: Plant, userId?: string | null): Promise<PlantMutationResult> {
-  if (!isSupabaseConfigured() || !userId) {
+  if (!isSupabaseConfigured()) {
     return {
       data: plant,
       success: true,
       savedInSupabase: false,
+      error: 'Supabase não configurado. Planta salva no armazenamento local.',
     };
   }
 
@@ -238,11 +239,32 @@ export async function createUserPlant(plant: Plant, userId?: string | null): Pro
       data: plant,
       success: true,
       savedInSupabase: false,
+      error: 'Cliente Supabase indisponível. Planta salva no armazenamento local.',
+    };
+  }
+
+  // Resolve user_id: if not provided by caller, check existing Supabase Auth session
+  let effectiveUserId = userId;
+  if (!effectiveUserId) {
+    try {
+      const { data: sessionData } = await client.auth.getSession();
+      effectiveUserId = sessionData?.session?.user?.id || null;
+    } catch (authErr) {
+      console.warn('[PlantAI / PlantService] Não foi possível recuperar sessão ativa do Supabase:', authErr);
+    }
+  }
+
+  if (!effectiveUserId) {
+    return {
+      data: plant,
+      success: true,
+      savedInSupabase: false,
+      error: 'Sessão de usuário não autenticada no Supabase. Planta preservada localmente.',
     };
   }
 
   try {
-    const row = plantToDbRow(plant, userId);
+    const row = plantToDbRow(plant, effectiveUserId);
     const { data, error } = await client
       .from('plants')
       .insert([row])
