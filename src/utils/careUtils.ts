@@ -13,7 +13,9 @@ export const WATERING_FREQUENCY_OPTIONS: { id: WateringFrequencyPreset; label: s
   { id: 'a_cada_2_dias', label: 'A cada 2 dias', defaultDays: 2 },
   { id: 'a_cada_3_dias', label: 'A cada 3 dias', defaultDays: 3 },
   { id: 'semanalmente', label: 'Semanalmente (a cada 7 dias)', defaultDays: 7 },
+  { id: 'a_cada_10_dias', label: 'A cada 10 dias', defaultDays: 10 },
   { id: 'a_cada_15_dias', label: 'A cada 15 dias (quinzenal)', defaultDays: 15 },
+  { id: 'a_cada_30_dias', label: 'A cada 30 dias (mensal)', defaultDays: 30 },
   { id: 'personalizada', label: 'Frequência personalizada...', defaultDays: 7 },
 ];
 
@@ -91,37 +93,95 @@ export function mapWaterNeedsLabel(days: number): 'Alta (2-3x/sem)' | 'Média (1
 
 /**
  * Derives structured care fields automatically from AI-generated SpeciesCareGuide
- * without inventing values when data is absent (using 'Não informado' or empty).
+ * prioritizing explicit numeric intervals and botanical taxonomy over generic fallbacks.
  */
 export function deriveStructuredCareFromGuide(guide?: SpeciesCareGuide | null): PlantStructuredCare {
   if (!guide) {
     return { ...DEFAULT_STRUCTURED_CARE };
   }
 
-  // 1. Watering Frequency
+  // 1. Watering Frequency & Recommended Days
   let wateringFrequency: WateringFrequencyPreset = 'semanalmente';
+  let customWateringDays: number | undefined = undefined;
+  let recommendedInterval = guide.watering?.wateringDaysRecommended;
+
   const wf = (guide.watering?.frequency || '').toLowerCase();
   const wn = (guide.watering?.need || '').toLowerCase();
+  const sciName = (guide.scientificName || '').toLowerCase();
 
-  if (wf.includes('diari') || wn.includes('diari')) {
-    wateringFrequency = 'diariamente';
-  } else if (wf.includes('2 dias') || wf.includes('a cada 2') || wf.includes('dias alternados')) {
-    wateringFrequency = 'a_cada_2_dias';
-  } else if (wf.includes('3 dias') || wf.includes('2 a 3') || wf.includes('2 ou 3')) {
-    wateringFrequency = 'a_cada_3_dias';
-  } else if (wf.includes('15') || wf.includes('quinzen') || wf.includes('2 semanas') || wf.includes('duas semanas')) {
-    wateringFrequency = 'a_cada_15_dias';
-  } else if (wf.includes('semana') || wf.includes('1 vez por semana') || wf.includes('1x')) {
-    wateringFrequency = 'semanalmente';
+  // If the AI or backend grounding provided a numeric recommended interval, map directly
+  if (typeof recommendedInterval === 'number' && recommendedInterval > 0) {
+    if (recommendedInterval === 1) {
+      wateringFrequency = 'diariamente';
+    } else if (recommendedInterval === 2) {
+      wateringFrequency = 'a_cada_2_dias';
+    } else if (recommendedInterval >= 3 && recommendedInterval <= 4) {
+      wateringFrequency = 'a_cada_3_dias';
+    } else if (recommendedInterval >= 6 && recommendedInterval <= 8) {
+      wateringFrequency = 'semanalmente';
+    } else if (recommendedInterval >= 9 && recommendedInterval <= 11) {
+      wateringFrequency = 'a_cada_10_dias';
+    } else if (recommendedInterval >= 13 && recommendedInterval <= 17) {
+      wateringFrequency = 'a_cada_15_dias';
+    } else if (recommendedInterval >= 27 && recommendedInterval <= 33) {
+      wateringFrequency = 'a_cada_30_dias';
+    } else {
+      wateringFrequency = 'personalizada';
+      customWateringDays = recommendedInterval;
+    }
+  } else {
+    // Robust textual parsing: Check weeks first (crucial to avoid "2 a 3 semanas" matching "2 a 3 dias")
+    if (wf.includes('3 a 4 semanas') || wf.includes('4 semanas') || wf.includes('um mês') || wf.includes('1 mes') || wf.includes('mensal') || wf.includes('30 dias')) {
+      wateringFrequency = 'a_cada_30_dias';
+      recommendedInterval = 30;
+    } else if (
+      wf.includes('2 a 3 semanas') ||
+      wf.includes('2 ou 3 semanas') ||
+      wf.includes('2 semanas') ||
+      wf.includes('duas semanas') ||
+      wf.includes('quinzen') ||
+      wf.includes('15 dias') ||
+      wf.includes('14 dias') ||
+      wf.includes('15 a 20 dias')
+    ) {
+      wateringFrequency = 'a_cada_15_dias';
+      recommendedInterval = 15;
+    } else if (wf.includes('10 a 14 dias') || wf.includes('10 a 15 dias') || wf.includes('10 dias') || wf.includes('12 dias')) {
+      wateringFrequency = 'a_cada_10_dias';
+      recommendedInterval = 10;
+    } else if (wf.includes('diari') || wn.includes('diari')) {
+      wateringFrequency = 'diariamente';
+      recommendedInterval = 1;
+    } else if (wf.includes('2 dias') || wf.includes('a cada 2 dias') || wf.includes('dias alternados')) {
+      wateringFrequency = 'a_cada_2_dias';
+      recommendedInterval = 2;
+    } else if (wf.includes('3 dias') || wf.includes('2 a 3 dias') || wf.includes('2 ou 3 dias') || wf.includes('3 a 4 dias')) {
+      wateringFrequency = 'a_cada_3_dias';
+      recommendedInterval = 3;
+    } else if (wf.includes('semana') || wf.includes('1 vez por semana') || wf.includes('1x por semana') || wf.includes('7 dias')) {
+      wateringFrequency = 'semanalmente';
+      recommendedInterval = 7;
+    } else if (wn.includes('baixa') || sciName.includes('sansevieria') || sciName.includes('zamioculcas') || sciName.includes('cact')) {
+      wateringFrequency = 'a_cada_15_dias';
+      recommendedInterval = 15;
+    } else if (wn.includes('alta') || sciName.includes('nephrolepis') || sciName.includes('samambaia')) {
+      wateringFrequency = 'a_cada_3_dias';
+      recommendedInterval = 3;
+    } else {
+      wateringFrequency = 'semanalmente';
+      recommendedInterval = 7;
+    }
   }
 
   // 2. Soil Moisture Check
-  const soilMoistureCheck = guide.watering?.checkMethod?.trim() || 'Não informado';
+  const soilMoistureCheck =
+    guide.watering?.checkMethod?.trim() ||
+    'Verifique o solo com o dedo ou palito antes de regar. Só regue quando o substrato estiver seco de acordo com as necessidades da espécie.';
 
   // 3. Lighting
   let sunlightType: SunlightPreset = 'luz_indireta_intensa';
   const lt = (guide.lighting?.type || '').toLowerCase();
-  if (lt.includes('pleno') || lt.includes('direto')) {
+  if (lt.includes('pleno') || lt.includes('direto') || lt.includes('sol direto')) {
     sunlightType = 'sol_direto';
   } else if (lt.includes('meia-sombra') || lt.includes('meia sombra')) {
     sunlightType = 'meia_sombra';
@@ -132,7 +192,7 @@ export function deriveStructuredCareFromGuide(guide?: SpeciesCareGuide | null): 
   }
 
   // 4. Fertilization
-  const fertilizerType = guide.fertilization?.type?.trim() || 'Não informado';
+  const fertilizerType = guide.fertilization?.type?.trim() || 'NPK equilibrado ou adubo orgânico';
   let fertilizerFrequency: FertilizingFrequencyPreset = 'mensal';
   const ff = (guide.fertilization?.frequency || '').toLowerCase();
 
@@ -161,11 +221,11 @@ export function deriveStructuredCareFromGuide(guide?: SpeciesCareGuide | null): 
   const substrate =
     guide.substrate?.idealMix?.trim() ||
     guide.substrate?.drainage?.trim() ||
-    'Não informado';
+    'Substrato leve com boa aeração e drenagem';
 
   // 6. Environment
-  const temperature = guide.environment?.temperature?.trim() || 'Não informado';
-  const humidity = guide.environment?.humidity?.trim() || 'Não informado';
+  const temperature = guide.environment?.temperature?.trim() || '18°C a 27°C';
+  const humidity = guide.environment?.humidity?.trim() || 'Moderada a alta';
 
   // 7. Maintenance
   const pruningNotes = guide.maintenance?.pruning?.trim();
@@ -179,10 +239,12 @@ export function deriveStructuredCareFromGuide(guide?: SpeciesCareGuide | null): 
     maintenanceParts.push(`Manejo: ${generalTips}`);
   }
 
-  const maintenanceNotes = maintenanceParts.length > 0 ? maintenanceParts.join(' | ') : 'Não informado';
+  const maintenanceNotes = maintenanceParts.length > 0 ? maintenanceParts.join(' | ') : 'Remover folhas secas na base.';
 
   return {
     wateringFrequency,
+    customWateringDays,
+    recommendedWateringIntervalDays: recommendedInterval,
     soilMoistureCheck,
     sunlightType,
     fertilizerType,
@@ -191,6 +253,7 @@ export function deriveStructuredCareFromGuide(guide?: SpeciesCareGuide | null): 
     temperature,
     humidity,
     maintenanceNotes,
+    toxicity: guide.toxicity,
   };
 }
 
@@ -212,7 +275,9 @@ export function getOrInitializeStructuredCare(plant: Plant): PlantStructuredCare
   else if (wDays === 2) wateringFreq = 'a_cada_2_dias';
   else if (wDays <= 4) wateringFreq = 'a_cada_3_dias';
   else if (wDays <= 8) wateringFreq = 'semanalmente';
+  else if (wDays <= 12) wateringFreq = 'a_cada_10_dias';
   else if (wDays <= 18) wateringFreq = 'a_cada_15_dias';
+  else if (wDays >= 25 && wDays <= 35) wateringFreq = 'a_cada_30_dias';
   else wateringFreq = 'personalizada';
 
   let sunPreset: SunlightPreset = 'luz_indireta_intensa';
@@ -224,6 +289,7 @@ export function getOrInitializeStructuredCare(plant: Plant): PlantStructuredCare
     ...DEFAULT_STRUCTURED_CARE,
     wateringFrequency: wateringFreq,
     customWateringDays: wateringFreq === 'personalizada' ? wDays : undefined,
+    recommendedWateringIntervalDays: wDays,
     sunlightType: sunPreset,
   };
 }

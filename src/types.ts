@@ -33,7 +33,9 @@ export type WateringFrequencyPreset =
   | 'a_cada_2_dias'
   | 'a_cada_3_dias'
   | 'semanalmente'
+  | 'a_cada_10_dias'
   | 'a_cada_15_dias'
+  | 'a_cada_30_dias'
   | 'personalizada';
 
 export type SunlightPreset =
@@ -53,11 +55,29 @@ export type FertilizingFrequencyPreset =
   | 'nao_necessaria'
   | 'personalizada';
 
+export type ToxicityLevel =
+  | 'toxica'
+  | 'moderadamente_toxica'
+  | 'possivel_risco'
+  | 'segura'
+  | 'desconhecida';
+
+export interface PlantToxicityInfo {
+  level: ToxicityLevel;
+  toxicToPets: boolean | null; // true = tóxica, false = segura para pets, null = dados insuficientes/desconhecido
+  toxicToHumans: boolean | null; // true = tóxica, false = segura para humanos, null = dados insuficientes
+  principles?: string; // Ex: Oxalato de cálcio insolúvel, Saponinas, Látex irritante
+  symptoms?: string; // Ex: Irritação oral, vômito, edema de lábios e língua
+  warningText: string; // Ex: "Mantenha fora do alcance de cães e gatos."
+  sourceNotes?: string;
+}
+
 export interface PlantStructuredCare {
   // Rega
   wateringFrequency: WateringFrequencyPreset;
   customWateringDays?: number;
   soilMoistureCheck: string;
+  recommendedWateringIntervalDays?: number;
 
   // Iluminação
   sunlightType: SunlightPreset;
@@ -77,6 +97,9 @@ export interface PlantStructuredCare {
 
   // Manutenção
   maintenanceNotes: string;
+
+  // Toxicidade preservada na planta
+  toxicity?: PlantToxicityInfo;
 }
 
 export interface Plant {
@@ -115,6 +138,9 @@ export interface SpeciesCareGuide {
     checkMethod: string;
     frequency: string;
     alert: string;
+    wateringDaysRecommended?: number;
+    wateringDaysMin?: number;
+    wateringDaysMax?: number;
   };
   lighting: {
     type: string;
@@ -140,6 +166,7 @@ export interface SpeciesCareGuide {
     repotting: string;
     generalTips?: string;
   };
+  toxicity?: PlantToxicityInfo;
   confidenceNote: string;
   source?: string;
   lastUpdated?: string;

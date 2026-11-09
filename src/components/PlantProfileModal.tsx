@@ -27,6 +27,7 @@ import {
   Edit3,
   Save,
   Trash2,
+  ShieldAlert,
 } from 'lucide-react';
 import { PlantStructuredCare, CareSchedule } from '../types';
 import {
@@ -742,6 +743,44 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
                         </p>
                       </div>
                     </div>
+
+                    {/* 7. Toxicidade e Segurança */}
+                    {(structuredCare.toxicity || currentCareGuide?.toxicity) && (
+                      <div className="bg-white p-5 rounded-3xl border border-rose-200/80 shadow-2xs space-y-2.5 md:col-span-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2 text-rose-800">
+                            <div className="w-8 h-8 rounded-xl bg-rose-100 flex items-center justify-center shrink-0">
+                              <ShieldAlert className="w-4 h-4 text-rose-700" />
+                            </div>
+                            <div>
+                              <h4 className="font-bold text-xs uppercase tracking-wider text-[#2D3A2D]">
+                                Toxicidade e Segurança Doméstica
+                              </h4>
+                              <span className="text-[11px] font-semibold text-rose-700">
+                                {(structuredCare.toxicity || currentCareGuide?.toxicity)?.level === 'segura'
+                                  ? 'Pet-Friendly (Segura)'
+                                  : (structuredCare.toxicity || currentCareGuide?.toxicity)?.level === 'toxica'
+                                  ? 'Tóxica (Alta)'
+                                  : (structuredCare.toxicity || currentCareGuide?.toxicity)?.level === 'moderadamente_toxica'
+                                  ? 'Moderadamente Tóxica'
+                                  : 'Atenção / Risco'}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-3 bg-rose-50/60 rounded-2xl border border-rose-100 text-xs space-y-1">
+                          <p className="text-rose-950 font-medium leading-relaxed">
+                            {(structuredCare.toxicity || currentCareGuide?.toxicity)?.warningText}
+                          </p>
+                          {(structuredCare.toxicity || currentCareGuide?.toxicity)?.principles && (
+                            <p className="text-[11px] text-rose-800 pt-0.5">
+                              <strong>Princípio ativo:</strong> {(structuredCare.toxicity || currentCareGuide?.toxicity)?.principles}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/* Collapsible Accordion: Diretrizes da espécie (collapsed by default) */}

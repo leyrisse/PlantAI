@@ -8,6 +8,8 @@ import {
   SpeciesCareGuide,
   PlantStructuredCare,
   InitialPlantData,
+  WateringFrequencyPreset,
+  SunlightPreset,
 } from '../types';
 import {
   DEFAULT_STRUCTURED_CARE,
@@ -372,28 +374,65 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
 
   // Formatters for compact unalterable summary
   const getWateringSummaryLine = (): string => {
-    const map: Record<string, string> = {
-      daily: 'Diariamente (a cada 1 dia)',
-      every_2_days: 'A cada 2 dias',
-      every_3_days: 'A cada 3 dias',
-      weekly: 'Semanalmente (a cada 7 dias)',
-      biweekly: 'A cada 15 dias',
-      custom: `A cada ${structuredCare.customWateringDays || 7} dias`,
+    const map: Record<WateringFrequencyPreset, string> = {
+      diariamente: 'Diariamente (a cada 1 dia)',
+      a_cada_2_dias: 'A cada 2 dias',
+      a_cada_3_dias: 'A cada 3 dias',
+      semanalmente: 'Semanalmente (a cada 7 dias)',
+      a_cada_10_dias: 'A cada 10 dias',
+      a_cada_15_dias: 'A cada 15 dias (quinzenal)',
+      a_cada_30_dias: 'A cada 30 dias (mensal)',
+      personalizada: `Personalizada (a cada ${structuredCare.customWateringDays || 7} dias)`,
     };
-    const freq = map[structuredCare.wateringFrequency] || 'Semanalmente (a cada 7 dias)';
-    return structuredCare.wateringCheckMethod ? `${freq} • ${structuredCare.wateringCheckMethod}` : freq;
+    const freq = map[structuredCare.wateringFrequency] || `A cada ${structuredCare.customWateringDays || 7} dias`;
+    return structuredCare.soilMoistureCheck ? `${freq} • ${structuredCare.soilMoistureCheck}` : freq;
   };
 
   const getSunlightSummaryLine = (): string => {
-    const map: Record<string, string> = {
-      direct_sun: 'Sol direto',
-      bright_indirect: 'Luz indireta intensa',
-      partial_shade: 'Meia-sombra',
-      shade: 'Sombra',
-      other: 'Outra luminosidade',
+    const map: Record<SunlightPreset, string> = {
+      sol_direto: 'Sol direto (pleno)',
+      luz_indireta_intensa: 'Luz indireta intensa',
+      meia_sombra: 'Meia-sombra',
+      sombra: 'Sombra',
+      personalizada: structuredCare.customSunlight ? `Personalizada: ${structuredCare.customSunlight}` : 'Outra luminosidade',
     };
-    const sun = map[structuredCare.sunlightType] || 'Luz indireta intensa';
-    return structuredCare.sunlightNotes ? `${sun} (${structuredCare.sunlightNotes})` : sun;
+    return map[structuredCare.sunlightType] || 'Luz indireta intensa';
+  };
+
+  const getToxicityBadge = (toxicity?: PlantStructuredCare['toxicity']) => {
+    if (!toxicity) return null;
+    switch (toxicity.level) {
+      case 'toxica':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300">
+            ⚠️ Tóxica para pets e humanos
+          </span>
+        );
+      case 'moderadamente_toxica':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+            ⚠️ Moderadamente tóxica
+          </span>
+        );
+      case 'possivel_risco':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-yellow-100 text-yellow-900 border border-yellow-300">
+            ⚠️ Possível risco / Atenção
+          </span>
+        );
+      case 'segura':
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-900 border border-emerald-300">
+            🐾 Segura (Pet-friendly)
+          </span>
+        );
+      default:
+        return (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-stone-100 text-stone-700 border border-stone-300">
+            ❓ Toxicidade desconhecida
+          </span>
+        );
+    }
   };
 
   // Primary save action: saves immediately with current care fields (preventing duplicate clicks)
@@ -431,6 +470,7 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
         sunlightNeeds: legacySunlight,
         waterNeeds: legacyWaterNeeds,
         acquisitionStory: acquisitionStory || 'Registrada com carinho no aplicativo Jardim.',
+        careGuide: fetchedCareGuide || initialData?.careGuide || undefined,
         structuredCare: { ...structuredCare },
         careSchedule: {
           waterFrequencyDays: wateringDays,
@@ -461,7 +501,6 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
           },
         ],
         isOrphan: false,
-        careGuide: fetchedCareGuide || undefined,
       };
 
       setSaveError(null);
@@ -809,6 +848,20 @@ export const NewPlantModal: React.FC<NewPlantModalProps> = ({
                   {getSunlightSummaryLine()}
                 </span>
               </div>
+
+              {(structuredCare.toxicity || fetchedCareGuide?.toxicity) && (
+                <div className="flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-2 bg-white/70 p-2.5 rounded-xl border border-[#2D3A2D]/10">
+                  <span className="font-bold text-[#5A5A40] shrink-0 uppercase tracking-wider text-[10px]">
+                    Toxicidade:
+                  </span>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {getToxicityBadge(structuredCare.toxicity || fetchedCareGuide?.toxicity)}
+                    <span className="text-[11px] text-[#5A5A40]">
+                      {(structuredCare.toxicity || fetchedCareGuide?.toxicity)?.warningText}
+                    </span>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Nickname & Environment quick preview if desired */}

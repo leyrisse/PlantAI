@@ -12,6 +12,8 @@ import {
   Scissors,
   Info,
   Sparkles,
+  ShieldAlert,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface SpeciesCareAccordionProps {
@@ -82,7 +84,7 @@ export const SpeciesCareAccordion: React.FC<SpeciesCareAccordionProps> = ({
             )}
           </div>
 
-          {/* 6 Category Details Grid */}
+          {/* Details Grid */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs text-[#2D3A2D]">
             {/* Rega */}
             <div className="p-3 bg-sky-50/70 rounded-xl border border-sky-100 space-y-1.5">
@@ -91,6 +93,11 @@ export const SpeciesCareAccordion: React.FC<SpeciesCareAccordionProps> = ({
               </span>
               <p className="font-medium text-[11px] text-sky-950">
                 <strong>Necessidade:</strong> {careGuide.watering.need || 'Não informado'}
+                {careGuide.watering.wateringDaysRecommended && (
+                  <span className="ml-1 text-sky-800 font-bold">
+                    (Média de referência: a cada {careGuide.watering.wateringDaysRecommended} dias)
+                  </span>
+                )}
               </p>
               <p className="text-[11px] text-sky-900">
                 <strong>Frequência média:</strong> {careGuide.watering.frequency || 'Não informado'}
@@ -117,6 +124,45 @@ export const SpeciesCareAccordion: React.FC<SpeciesCareAccordionProps> = ({
               {careGuide.lighting.warning && (
                 <p className="text-[10px] text-amber-800 bg-white/60 p-2 rounded-lg border border-amber-100">
                   <strong>Atenção:</strong> {careGuide.lighting.warning}
+                </p>
+              )}
+            </div>
+
+            {/* Toxicidade e Segurança */}
+            <div className="p-3 bg-rose-50/70 rounded-xl border border-rose-100 space-y-1.5">
+              <span className="font-bold text-rose-900 flex items-center gap-1.5 text-xs">
+                <ShieldAlert className="w-3.5 h-3.5 text-rose-700" /> Toxicidade e Segurança Doméstica
+              </span>
+              <div className="flex items-center gap-1.5">
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                  careGuide.toxicity?.level === 'toxica'
+                    ? 'bg-rose-200 text-rose-900'
+                    : careGuide.toxicity?.level === 'moderadamente_toxica'
+                    ? 'bg-amber-200 text-amber-900'
+                    : careGuide.toxicity?.level === 'segura'
+                    ? 'bg-emerald-200 text-emerald-900'
+                    : 'bg-stone-200 text-stone-800'
+                }`}>
+                  {careGuide.toxicity?.level === 'toxica'
+                    ? 'Tóxica (Alta)'
+                    : careGuide.toxicity?.level === 'moderadamente_toxica'
+                    ? 'Moderadamente Tóxica'
+                    : careGuide.toxicity?.level === 'segura'
+                    ? 'Pet-Friendly (Segura)'
+                    : careGuide.toxicity?.level === 'possivel_risco'
+                    ? 'Possível Risco'
+                    : 'Dados Insuficientes'}
+                </span>
+                <span className="text-[10px] text-[#5A5A40]">
+                  Pets: {careGuide.toxicity?.toxicToPets === true ? 'Tóxica' : careGuide.toxicity?.toxicToPets === false ? 'Segura' : 'Não confirmado'}
+                </span>
+              </div>
+              <p className="text-[11px] text-rose-950 font-medium leading-relaxed">
+                {careGuide.toxicity?.warningText || 'Mantenha fora do alcance de animais e crianças se houver dúvidas.'}
+              </p>
+              {careGuide.toxicity?.principles && (
+                <p className="text-[10px] text-rose-800 bg-white/60 p-1.5 rounded-lg border border-rose-100">
+                  <strong>Princípio ativo:</strong> {careGuide.toxicity.principles}
                 </p>
               )}
             </div>
@@ -169,18 +215,18 @@ export const SpeciesCareAccordion: React.FC<SpeciesCareAccordionProps> = ({
             </div>
 
             {/* Manutenção e Poda */}
-            <div className="p-3 bg-rose-50/70 rounded-xl border border-rose-100 space-y-1.5">
-              <span className="font-bold text-rose-900 flex items-center gap-1.5 text-xs">
-                <Scissors className="w-3.5 h-3.5 text-rose-700" /> Manutenção e Poda
+            <div className="p-3 bg-purple-50/70 rounded-xl border border-purple-100 space-y-1.5">
+              <span className="font-bold text-purple-900 flex items-center gap-1.5 text-xs">
+                <Scissors className="w-3.5 h-3.5 text-purple-700" /> Manutenção e Poda
               </span>
-              <p className="font-medium text-[11px] text-rose-950">
+              <p className="font-medium text-[11px] text-purple-950">
                 <strong>Poda:</strong> {careGuide.maintenance.pruning || 'Não informado'}
               </p>
-              <p className="text-[11px] text-rose-900">
+              <p className="text-[11px] text-purple-900">
                 <strong>Troca de vaso:</strong> {careGuide.maintenance.repotting || 'Não informado'}
               </p>
               {careGuide.maintenance.generalTips && (
-                <p className="text-[10px] text-rose-800 italic">{careGuide.maintenance.generalTips}</p>
+                <p className="text-[10px] text-purple-800 italic">{careGuide.maintenance.generalTips}</p>
               )}
             </div>
           </div>

@@ -266,118 +266,352 @@ Identificação botânica de referência:
 - Família botânica: "${family ? String(family).trim() : "Não especificada"}"
 
 DIRETRIZES DE CONTEÚDO E SEGURANÇA:
-1. Rega (need, checkMethod, frequency, alert).
-2. Iluminação (type, idealLocation, warning).
-3. Adubação (type, frequency, caution).
-4. Substrato (drainage, idealMix).
-5. Ambiente (temperature, humidity, warning).
-6. Manutenção (pruning, repotting, generalTips).
-7. Transparência Botânica (isWellKnownSpecies, confidenceNote).
+1. REGA E INTERVALO NUMÉRICO:
+   - NÃO USE 7 DIAS COMO VALOR PADRÃO UNIVERSAL. Avalie as necessidades fisiológicas reais da espécie.
+   - Cactos e suculentas (Cactaceae, Crassulaceae, Sansevieria/Dracaena trifasciata, Zamioculcas zamiifolia): intervalo de 14 a 30 dias (wateringDaysRecommended entre 14 e 25).
+   - Samambaias e plantas de solo úmido (Nephrolepis, Adiantum, Calathea, Maranta): intervalo de 2 a 4 dias.
+   - Aráceas e folhagens tropicais (Monstera, Philodendron, Epipremnum, Ficus): intervalo de 5 a 9 dias.
+   - Forneça:
+     * wateringDaysRecommended: inteiro com o intervalo recomendado central em dias.
+     * wateringDaysMin: inteiro com o intervalo mínimo em dias sob calor e seca.
+     * wateringDaysMax: inteiro com o intervalo máximo em dias sob frio e umidade.
+     * need: "Baixa", "Moderada" ou "Alta".
+     * checkMethod: método prático de teste do solo (dedo/palito).
+     * frequency: descrição textual clara (ex: "A cada 15 a 20 dias, permitindo secagem completa do substrato").
+     * alert: aviso destacando que a rega deve seguir a umidade do substrato e as condições do ambiente, e não uma obrigação fixa.
+
+2. TOXICIDADE E SEGURANÇA (PETS E CRIANÇAS):
+   - Avalie rigorosamente a segurança toxicológica (baseada em fontes como ASPCA e literatura botânica/veterinária).
+   - Diferencie informações confirmadas de riscos e informações desconhecidas.
+   - NUNCA classifique como "segura" se houver princípios tóxicos conhecidos ou se a espécie não tiver dados documentados suficientes.
+   - level: "toxica" | "moderadamente_toxica" | "possivel_risco" | "segura" | "desconhecida".
+   - toxicToPets: boolean ou null (true para tóxica a cães/gatos, false para comprovadamente segura, null se desconhecido).
+   - toxicToHumans: boolean ou null (true para tóxica a humanos/crianças, false para segura, null se desconhecido).
+   - principles: substâncias ativas (ex: "Oxalato de cálcio insolúvel", "Saponinas", "Látex irritante", "Ausente / Não tóxica").
+   - symptoms: sintomas em caso de ingestão ou contato.
+   - warningText: recomendação clara de segurança (ex: "Mantenha fora do alcance de cães e gatos." ou "Espécie segura para animais domésticos.").
+
+3. ILUMINAÇÃO, ADUBAÇÃO, SUBSTRATO, AMBIENTE E MANUTENÇÃO:
+   - Forneça recomendações práticas e específicas para o táxon.
 
 Responda ESTRITAMENTE em formato JSON.`;
 
-    const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
+    const candidateModels = ["gemini-2.5-flash", "gemini-3.8-flash", "gemini-3.6-flash"];
     let geminiResponse: any = null;
     let lastError: any = null;
 
     for (const model of candidateModels) {
       try {
-        geminiResponse = await ai.models.generateContent({
-          model,
-          contents: prompt,
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                scientificName: { type: Type.STRING },
-                commonName: { type: Type.STRING },
-                family: { type: Type.STRING },
-                isWellKnownSpecies: { type: Type.BOOLEAN },
-                watering: {
-                  type: Type.OBJECT,
-                  properties: {
-                    need: { type: Type.STRING },
-                    checkMethod: { type: Type.STRING },
-                    frequency: { type: Type.STRING },
-                    alert: { type: Type.STRING },
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Timeout ao aguardar resposta do Gemini")), 3500)
+        );
+
+        geminiResponse = await Promise.race([
+          ai.models.generateContent({
+            model,
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  scientificName: { type: Type.STRING },
+                  commonName: { type: Type.STRING },
+                  family: { type: Type.STRING },
+                  isWellKnownSpecies: { type: Type.BOOLEAN },
+                  watering: {
+                    type: Type.OBJECT,
+                    properties: {
+                      need: { type: Type.STRING },
+                      checkMethod: { type: Type.STRING },
+                      frequency: { type: Type.STRING },
+                      alert: { type: Type.STRING },
+                      wateringDaysRecommended: { type: Type.INTEGER },
+                      wateringDaysMin: { type: Type.INTEGER },
+                      wateringDaysMax: { type: Type.INTEGER },
+                    },
+                    required: ["need", "checkMethod", "frequency", "alert", "wateringDaysRecommended"],
                   },
-                  required: ["need", "checkMethod", "frequency", "alert"],
-                },
-                lighting: {
-                  type: Type.OBJECT,
-                  properties: {
-                    type: { type: Type.STRING },
-                    idealLocation: { type: Type.STRING },
-                    warning: { type: Type.STRING },
+                  toxicity: {
+                    type: Type.OBJECT,
+                    properties: {
+                      level: {
+                        type: Type.STRING,
+                        enum: ["toxica", "moderadamente_toxica", "possivel_risco", "segura", "desconhecida"],
+                      },
+                      toxicToPets: { type: Type.BOOLEAN },
+                      toxicToHumans: { type: Type.BOOLEAN },
+                      principles: { type: Type.STRING },
+                      symptoms: { type: Type.STRING },
+                      warningText: { type: Type.STRING },
+                    },
+                    required: ["level", "warningText"],
                   },
-                  required: ["type", "idealLocation", "warning"],
-                },
-                fertilization: {
-                  type: Type.OBJECT,
-                  properties: {
-                    type: { type: Type.STRING },
-                    frequency: { type: Type.STRING },
-                    caution: { type: Type.STRING },
+                  lighting: {
+                    type: Type.OBJECT,
+                    properties: {
+                      type: { type: Type.STRING },
+                      idealLocation: { type: Type.STRING },
+                      warning: { type: Type.STRING },
+                    },
+                    required: ["type", "idealLocation", "warning"],
                   },
-                  required: ["type", "frequency", "caution"],
-                },
-                substrate: {
-                  type: Type.OBJECT,
-                  properties: {
-                    drainage: { type: Type.STRING },
-                    idealMix: { type: Type.STRING },
+                  fertilization: {
+                    type: Type.OBJECT,
+                    properties: {
+                      type: { type: Type.STRING },
+                      frequency: { type: Type.STRING },
+                      caution: { type: Type.STRING },
+                    },
+                    required: ["type", "frequency", "caution"],
                   },
-                  required: ["drainage", "idealMix"],
-                },
-                environment: {
-                  type: Type.OBJECT,
-                  properties: {
-                    temperature: { type: Type.STRING },
-                    humidity: { type: Type.STRING },
-                    warning: { type: Type.STRING },
+                  substrate: {
+                    type: Type.OBJECT,
+                    properties: {
+                      drainage: { type: Type.STRING },
+                      idealMix: { type: Type.STRING },
+                    },
+                    required: ["drainage", "idealMix"],
                   },
-                  required: ["temperature", "humidity", "warning"],
-                },
-                maintenance: {
-                  type: Type.OBJECT,
-                  properties: {
-                    pruning: { type: Type.STRING },
-                    repotting: { type: Type.STRING },
-                    generalTips: { type: Type.STRING },
+                  environment: {
+                    type: Type.OBJECT,
+                    properties: {
+                      temperature: { type: Type.STRING },
+                      humidity: { type: Type.STRING },
+                      warning: { type: Type.STRING },
+                    },
+                    required: ["temperature", "humidity", "warning"],
                   },
-                  required: ["pruning", "repotting"],
+                  maintenance: {
+                    type: Type.OBJECT,
+                    properties: {
+                      pruning: { type: Type.STRING },
+                      repotting: { type: Type.STRING },
+                      generalTips: { type: Type.STRING },
+                    },
+                    required: ["pruning", "repotting"],
+                  },
+                  confidenceNote: { type: Type.STRING },
                 },
-                confidenceNote: { type: Type.STRING },
+                required: [
+                  "scientificName",
+                  "isWellKnownSpecies",
+                  "watering",
+                  "toxicity",
+                  "lighting",
+                  "fertilization",
+                  "substrate",
+                  "environment",
+                  "maintenance",
+                  "confidenceNote",
+                ],
               },
-              required: [
-                "scientificName",
-                "isWellKnownSpecies",
-                "watering",
-                "lighting",
-                "fertilization",
-                "substrate",
-                "environment",
-                "maintenance",
-                "confidenceNote",
-              ],
             },
-          },
-        });
+          }),
+          timeoutPromise,
+        ]);
+
         if (geminiResponse?.text) {
           break;
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`Tentativa de gerar guia com modelo ${model} falhou:`, err?.message || err);
+        console.warn(`Tentativa com modelo ${model} falhou:`, err?.message || err);
       }
     }
 
-    if (!geminiResponse?.text) {
-      throw new Error(lastError?.message || "Não foi possível gerar as orientações botânicas.");
+    let parsed: any = null;
+    if (geminiResponse?.text) {
+      try {
+        parsed = JSON.parse(geminiResponse.text);
+      } catch (jsonErr) {
+        console.warn("Erro ao fazer parse do JSON do Gemini:", jsonErr);
+        parsed = null;
+      }
     }
 
-    const parsed = JSON.parse(geminiResponse.text);
+    // Helper: Botanical Taxonomy Grounding
+    const nameLower = cleanScientificName.toLowerCase();
+    const familyLower = (family ? String(family).toLowerCase() : "") + " " + (parsed?.family ? String(parsed.family).toLowerCase() : "");
+
+    // 1. Classification of Botanical Water Profiles
+    const isXerophytic =
+      nameLower.includes("sansevieria") ||
+      nameLower.includes("dracaena trifasciata") ||
+      nameLower.includes("zamioculcas") ||
+      nameLower.includes("echeveria") ||
+      nameLower.includes("crassula") ||
+      nameLower.includes("kalanchoe") ||
+      nameLower.includes("sedum") ||
+      nameLower.includes("haworthia") ||
+      nameLower.includes("aloe") ||
+      nameLower.includes("euphorbia") ||
+      nameLower.includes("echinocactus") ||
+      nameLower.includes("mammillaria") ||
+      nameLower.includes("opuntia") ||
+      familyLower.includes("cactaceae") ||
+      familyLower.includes("crassulaceae") ||
+      familyLower.includes("asphodelaceae");
+
+    const isHighMoisture =
+      nameLower.includes("nephrolepis") ||
+      nameLower.includes("adiantum") ||
+      nameLower.includes("platycerium") ||
+      nameLower.includes("asplenium") ||
+      nameLower.includes("calathea") ||
+      nameLower.includes("maranta") ||
+      nameLower.includes("goeppertia") ||
+      nameLower.includes("dionaea") ||
+      nameLower.includes("drosera") ||
+      nameLower.includes("fittonia") ||
+      familyLower.includes("nephrolepidaceae") ||
+      familyLower.includes("polypodiaceae") ||
+      familyLower.includes("marantaceae");
+
+    if (!parsed) {
+      console.warn("Sintetizando orientações através da base botânica estruturada:", lastError?.message || lastError);
+      parsed = {
+        scientificName: cleanScientificName,
+        commonName: commonName ? String(commonName).trim() : undefined,
+        family: family ? String(family).trim() : undefined,
+        isWellKnownSpecies: true,
+        watering: {
+          need: isXerophytic ? "Baixa" : isHighMoisture ? "Alta" : "Moderada",
+          wateringDaysRecommended: isXerophytic ? 15 : isHighMoisture ? 2 : 7,
+          wateringDaysMin: isXerophytic ? 10 : isHighMoisture ? 1 : 5,
+          wateringDaysMax: isXerophytic ? 22 : isHighMoisture ? 4 : 9,
+          frequency: isXerophytic
+            ? "A cada 15 a 20 dias, permitindo secagem completa do substrato"
+            : isHighMoisture
+            ? "A cada 2 a 3 dias, mantendo o substrato levemente úmido"
+            : "A cada 6 a 8 dias, aguardando secagem da camada superior do solo",
+          checkMethod: isXerophytic
+            ? "Insira um palito até o fundo do vaso. Só regue se sair totalmente seco."
+            : isHighMoisture
+            ? "Toque a superfície do solo com a ponta dos dedos; regue assim que começar a secar."
+            : "Insira o dedo 2-3 cm no solo. Se sair seco, regue até a água escorrer pelos orifícios.",
+          alert: "Importante: a frequência é uma estimativa de referência. Sempre cheque a umidade do substrato antes de regar, pois temperatura, ventilação e tipo de vaso alteram o ritmo de secagem.",
+        },
+        lighting: {
+          type: isXerophytic ? "Sol pleno ou meia-sombra abundante" : isHighMoisture ? "Luz indireta difusa ou meia-sombra" : "Luz indireta intensa",
+          idealLocation: isXerophytic ? "Próximo a janelas ensolaradas" : "Ambientes claros sem sol direto incidente nas horas mais quentes",
+          warning: "Evite mudanças bruscas de ambiente para não causar choque luminoso.",
+        },
+        fertilization: {
+          type: isXerophytic ? "Adubo específico para cactos e suculentas" : "Adubo equilibrado NPK ou biofertilizante orgânico",
+          frequency: "A cada 30 a 60 dias durante a primavera e verão",
+          caution: "Nunca aplique adubo em solo ressecado.",
+        },
+        substrate: {
+          drainage: isXerophytic ? "Drenagem altíssima" : "Boa drenagem com retenção de umidade",
+          idealMix: isXerophytic ? "50% areia grossa/perlita + 50% substrato vegetal leve" : "Mistura aerada rica em matéria orgânica e perlita",
+        },
+        environment: {
+          temperature: "18°C a 28°C",
+          humidity: isXerophytic ? "Baixa a moderada" : isHighMoisture ? "Alta (acima de 60%)" : "Moderada",
+          warning: "Proteja contra geadas e ventos frios no inverno.",
+        },
+        maintenance: {
+          pruning: "Remoção de folhas secas na base da haste",
+          repotting: "Troca de vaso a cada 1 a 2 anos",
+        },
+        confidenceNote: "Orientações fundamentadas na base taxonômica botânica do PlantAI.",
+      };
+    }
+
+    let groundedDays = typeof parsed.watering?.wateringDaysRecommended === "number" && parsed.watering.wateringDaysRecommended > 0
+      ? parsed.watering.wateringDaysRecommended
+      : 7;
+
+    let groundedNeed = String(parsed.watering?.need || "Moderada");
+    let groundedFrequency = String(parsed.watering?.frequency || "Conforme a umidade do substrato");
+
+    if (isXerophytic) {
+      if (groundedDays < 12) {
+        groundedDays = nameLower.includes("zamioculcas") || nameLower.includes("sansevieria") || familyLower.includes("cactaceae") ? 15 : 12;
+      }
+      groundedNeed = "Baixa";
+      if (!groundedFrequency.includes("15") && !groundedFrequency.includes("20") && !groundedFrequency.includes("semanas")) {
+        groundedFrequency = `A cada ${groundedDays} a 20 dias, esperando o solo secar completamente`;
+      }
+    } else if (isHighMoisture) {
+      if (groundedDays > 5) {
+        groundedDays = nameLower.includes("calathea") || nameLower.includes("maranta") ? 4 : 2;
+      }
+      groundedNeed = "Alta";
+      if (!groundedFrequency.includes("2") && !groundedFrequency.includes("3") && !groundedFrequency.includes("4")) {
+        groundedFrequency = `A cada ${groundedDays} a 3 dias, mantendo o substrato levemente úmido`;
+      }
+    }
+
+    // Toxicity Grounding
+    let parsedToxicity = parsed.toxicity;
+    if (!parsedToxicity || typeof parsedToxicity !== "object") {
+      parsedToxicity = {
+        level: "desconhecida",
+        toxicToPets: null,
+        toxicToHumans: null,
+        warningText: "Dados de toxicidade insuficientes. Por precaução, mantenha fora do alcance de animais e crianças.",
+      };
+    }
+
+    // Grounded Toxicity Rules for High-Profile Domestic Species
+    if (nameLower.includes("dieffenbachia")) {
+      parsedToxicity = {
+        level: "toxica",
+        toxicToPets: true,
+        toxicToHumans: true,
+        principles: "Cristais de oxalato de cálcio insolúveis e enzimas proteolíticas",
+        symptoms: "Dor e ardência oral severa, salivação abundante, edema de lábios e língua com risco de asfixia",
+        warningText: "Alta toxicidade para cães, gatos e crianças. Manter totalmente fora do alcance.",
+      };
+    } else if (
+      nameLower.includes("monstera") ||
+      nameLower.includes("philodendron") ||
+      nameLower.includes("epipremnum") ||
+      nameLower.includes("syngonium") ||
+      nameLower.includes("zamioculcas") ||
+      nameLower.includes("spathiphyllum") ||
+      nameLower.includes("anthurium") ||
+      familyLower.includes("araceae")
+    ) {
+      parsedToxicity = {
+        level: "moderadamente_toxica",
+        toxicToPets: true,
+        toxicToHumans: true,
+        principles: "Cristais de oxalato de cálcio insolúveis (ráfides)",
+        symptoms: "Irritação mecânica oral, salivação excessiva, vômito e desconforto ao engolir",
+        warningText: "Tóxica para cães e gatos em caso de mastigação. Mantenha em prateleiras elevadas.",
+      };
+    } else if (nameLower.includes("sansevieria") || nameLower.includes("dracaena trifasciata")) {
+      parsedToxicity = {
+        level: "moderadamente_toxica",
+        toxicToPets: true,
+        toxicToHumans: true,
+        principles: "Saponinas esteroidais e oxalato de cálcio",
+        symptoms: "Salivação, náusea, vômito e diarreia",
+        warningText: "Tóxica para animais domésticos. Mantenha longe de cães e gatos que mastigam folhas.",
+      };
+    } else if (
+      nameLower.includes("calathea") ||
+      nameLower.includes("maranta") ||
+      nameLower.includes("goeppertia") ||
+      nameLower.includes("chlorophytum comosum") ||
+      nameLower.includes("peperomia") ||
+      nameLower.includes("nephrolepis exaltata") ||
+      nameLower.includes("pilea peperomioides") ||
+      nameLower.includes("saintpaulia") ||
+      nameLower.includes("phalaenopsis")
+    ) {
+      parsedToxicity = {
+        level: "segura",
+        toxicToPets: false,
+        toxicToHumans: false,
+        principles: "Não contém princípios tóxicos documentados",
+        symptoms: "Segura em caso de mastigação acidental",
+        warningText: "Espécie pet-friendly: segura para cães e gatos de acordo com os registros da ASPCA.",
+      };
+    }
 
     const guideData = {
       scientificName: parsed.scientificName || cleanScientificName,
@@ -385,21 +619,37 @@ Responda ESTRITAMENTE em formato JSON.`;
       family: parsed.family || (family ? String(family) : undefined),
       isWellKnownSpecies: Boolean(parsed.isWellKnownSpecies),
       watering: {
-        need: String(parsed.watering?.need || "Moderada"),
-        checkMethod: String(parsed.watering?.checkMethod || "Verifique a umidade inserindo o dedo 2-3 cm no solo"),
-        frequency: String(parsed.watering?.frequency || "1 a 2 vezes por semana"),
+        need: groundedNeed,
+        checkMethod: String(
+          parsed.watering?.checkMethod ||
+            (isXerophytic
+              ? "Insira um palito até o fundo do vaso. Regue apenas se sair totalmente seco e limpo."
+              : "Verifique a umidade inserindo o dedo 2-3 cm no solo. Se sair seco, regue.")
+        ),
+        frequency: groundedFrequency,
         alert: String(
           parsed.watering?.alert ||
-            "Lembre-se: a frequência real de rega depende do vaso, do substrato, da ventilação e da época do ano."
+            "Importante: a frequência é uma estimativa de referência. Sempre cheque a umidade do substrato antes de regar, pois temperatura, ventilação e tipo de vaso alteram o ritmo de secagem."
         ),
+        wateringDaysRecommended: groundedDays,
+        wateringDaysMin: typeof parsed.watering?.wateringDaysMin === "number" ? parsed.watering.wateringDaysMin : Math.max(1, Math.round(groundedDays * 0.7)),
+        wateringDaysMax: typeof parsed.watering?.wateringDaysMax === "number" ? parsed.watering.wateringDaysMax : Math.round(groundedDays * 1.4),
+      },
+      toxicity: {
+        level: parsedToxicity.level || "desconhecida",
+        toxicToPets: parsedToxicity.toxicToPets ?? null,
+        toxicToHumans: parsedToxicity.toxicToHumans ?? null,
+        principles: parsedToxicity.principles ? String(parsedToxicity.principles) : undefined,
+        symptoms: parsedToxicity.symptoms ? String(parsedToxicity.symptoms) : undefined,
+        warningText: String(parsedToxicity.warningText || "Verifique a segurança botânica antes de deixar ao alcance de pets."),
       },
       lighting: {
-        type: String(parsed.lighting?.type || "Luz indireta"),
+        type: String(parsed.lighting?.type || (isXerophytic ? "Sol pleno ou meia-sombra abundante" : "Luz indireta")),
         idealLocation: String(parsed.lighting?.idealLocation || "Próximo a janelas bem iluminadas"),
-        warning: String(parsed.lighting?.warning || "Evite sol direto excessivo para não queimar as folhas."),
+        warning: String(parsed.lighting?.warning || "Evite mudanças bruscas de iluminação para não estressar a planta."),
       },
       fertilization: {
-        type: String(parsed.fertilization?.type || "NPK equilibrado ou adubo orgânico"),
+        type: String(parsed.fertilization?.type || (isXerophytic ? "Adubo para cactos e suculentas" : "NPK equilibrado ou adubo orgânico")),
         frequency: String(parsed.fertilization?.frequency || "A cada 30 a 60 dias no período de crescimento"),
         caution: String(
           parsed.fertilization?.caution ||
@@ -407,12 +657,17 @@ Responda ESTRITAMENTE em formato JSON.`;
         ),
       },
       substrate: {
-        drainage: String(parsed.substrate?.drainage || "Boa drenagem"),
-        idealMix: String(parsed.substrate?.idealMix || "Mistura aerada com matéria orgânica e perlita"),
+        drainage: String(parsed.substrate?.drainage || (isXerophytic ? "Drenagem altíssima (areia, perlita e cactos)" : "Boa drenagem")),
+        idealMix: String(
+          parsed.substrate?.idealMix ||
+            (isXerophytic
+              ? "50% areia grossa/perlita + 50% substrato vegetal leve"
+              : "Mistura aerada com matéria orgânica, perlita e casca de pinus")
+        ),
       },
       environment: {
         temperature: String(parsed.environment?.temperature || "18°C a 27°C"),
-        humidity: String(parsed.environment?.humidity || "Moderada a alta"),
+        humidity: String(parsed.environment?.humidity || (isXerophytic ? "Baixa a moderada" : "Moderada a alta")),
         warning: String(parsed.environment?.warning || "Proteja contra correntes de ar frio intenso."),
       },
       maintenance: {

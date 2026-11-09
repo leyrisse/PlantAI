@@ -743,32 +743,97 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   {/* Watering Card */}
                   <div className="bg-white p-4 rounded-2xl border border-[#5A5A40]/20 space-y-1.5 shadow-2xs">
-                    <div className="flex items-center gap-2 text-xs font-bold text-sky-900">
-                      <Droplets className="w-4 h-4 text-sky-600" />
-                      Rega & Umidade
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-sky-900">
+                        <Droplets className="w-4 h-4 text-sky-600" />
+                        Rega & Umidade
+                      </div>
+                      <span className="text-[10px] font-bold text-sky-800 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200">
+                        {identifiedResult.careGuide.watering.wateringDaysRecommended
+                          ? `A cada ${identifiedResult.careGuide.watering.wateringDaysRecommended} dias`
+                          : identifiedResult.careGuide.watering.need}
+                      </span>
                     </div>
                     <p className="text-xs font-semibold text-[#2D3A2D]">
-                      {identifiedResult.careGuide.wateringSummary || 'Verifique o solo antes de regar.'}
+                      {identifiedResult.careGuide.watering.frequency || 'Conforme a umidade do solo'}
                     </p>
                     <p className="text-[11px] text-[#5A5A40] leading-relaxed">
-                      {identifiedResult.careGuide.wateringFrequencyGuide}
+                      {identifiedResult.careGuide.watering.checkMethod || 'Verifique o solo antes de regar.'}
                     </p>
                   </div>
 
                   {/* Sunlight Card */}
                   <div className="bg-white p-4 rounded-2xl border border-[#5A5A40]/20 space-y-1.5 shadow-2xs">
-                    <div className="flex items-center gap-2 text-xs font-bold text-amber-900">
-                      <Sun className="w-4 h-4 text-amber-600" />
-                      Iluminação Recomendada
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-xs font-bold text-amber-900">
+                        <Sun className="w-4 h-4 text-amber-600" />
+                        Iluminação Recomendada
+                      </div>
+                      <span className="text-[10px] font-bold text-amber-800 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+                        {identifiedResult.careGuide.lighting.type || 'Luz indireta'}
+                      </span>
                     </div>
                     <p className="text-xs font-semibold text-[#2D3A2D]">
-                      {identifiedResult.careGuide.sunlightSummary || 'Luz indireta adequada.'}
+                      {identifiedResult.careGuide.lighting.idealLocation || 'Próximo a uma janela bem iluminada'}
                     </p>
                     <p className="text-[11px] text-[#5A5A40] leading-relaxed">
-                      {identifiedResult.careGuide.sunlightGuide}
+                      {identifiedResult.careGuide.lighting.warning || 'Evite sol direto excessivo nas horas mais quentes.'}
                     </p>
                   </div>
                 </div>
+
+                {/* Toxicity Banner */}
+                {identifiedResult.careGuide.toxicity && (
+                  <div className={`p-3.5 rounded-2xl border flex items-start gap-3 shadow-2xs ${
+                    identifiedResult.careGuide.toxicity.level === 'toxica'
+                      ? 'bg-rose-50/90 border-rose-200 text-rose-950'
+                      : identifiedResult.careGuide.toxicity.level === 'moderadamente_toxica'
+                      ? 'bg-amber-50/90 border-amber-200 text-amber-950'
+                      : identifiedResult.careGuide.toxicity.level === 'segura'
+                      ? 'bg-emerald-50/90 border-emerald-200 text-emerald-950'
+                      : 'bg-stone-50 border-stone-200 text-stone-900'
+                  }`}>
+                    <div className="shrink-0 mt-0.5">
+                      {identifiedResult.careGuide.toxicity.level === 'segura' ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-700" />
+                      ) : (
+                        <AlertCircle className={`w-5 h-5 ${
+                          identifiedResult.careGuide.toxicity.level === 'toxica' ? 'text-rose-700' : 'text-amber-700'
+                        }`} />
+                      )}
+                    </div>
+                    <div className="space-y-0.5 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold">Segurança e Toxicidade:</span>
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider ${
+                          identifiedResult.careGuide.toxicity.level === 'toxica'
+                            ? 'bg-rose-200/80 text-rose-900'
+                            : identifiedResult.careGuide.toxicity.level === 'moderadamente_toxica'
+                            ? 'bg-amber-200/80 text-amber-900'
+                            : identifiedResult.careGuide.toxicity.level === 'segura'
+                            ? 'bg-emerald-200/80 text-emerald-900'
+                            : 'bg-stone-200 text-stone-800'
+                        }`}>
+                          {identifiedResult.careGuide.toxicity.level === 'toxica'
+                            ? 'Tóxica'
+                            : identifiedResult.careGuide.toxicity.level === 'moderadamente_toxica'
+                            ? 'Moderadamente Tóxica'
+                            : identifiedResult.careGuide.toxicity.level === 'segura'
+                            ? 'Pet-Friendly (Segura)'
+                            : 'Dados Insuficientes'}
+                        </span>
+                      </div>
+                      <p className="text-xs leading-relaxed">
+                        {identifiedResult.careGuide.toxicity.warningText}
+                      </p>
+                      {identifiedResult.careGuide.toxicity.principles && (
+                        <p className="text-[11px] opacity-80 pt-0.5">
+                          <strong>Princípios ativos:</strong> {identifiedResult.careGuide.toxicity.principles}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
 
                 {/* Collapsible Full Care Accordion */}
                 <div className="pt-2">
