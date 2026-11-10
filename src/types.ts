@@ -12,12 +12,13 @@ export interface CareSchedule {
 export interface TimelineEvent {
   id: string;
   date: string;
-  type: CareTaskType | 'BLOOM' | 'TRANSFER' | 'ADOPTION' | 'MILESTONE';
+  type: CareTaskType | 'BLOOM' | 'TRANSFER' | 'ADOPTION' | 'MILESTONE' | 'DIAGNOSIS';
   title: string;
   description: string;
   authorName: string;
   authorRole?: string;
   photoUrl?: string;
+  diagnosisData?: PlantDiagnosisResult;
 }
 
 export interface Tutor {
@@ -377,5 +378,84 @@ export interface AuthState {
   isConfigured: boolean;
   error: string | null;
   retryAuth: () => Promise<void>;
+}
+
+// =========================================================================
+// DIAGNÓSTICO FITOSSANITÁRIO (PLANT HEALTH DIAGNOSIS)
+// =========================================================================
+
+export type DiagnosticConfidence = 'ALTA' | 'MODERADA' | 'BAIXA' | 'INCONCLUSIVA';
+
+export type DiagnosticCategory =
+  | 'IRRIGACAO'
+  | 'ILUMINACAO'
+  | 'NUTRICAO'
+  | 'PRAGA'
+  | 'PATOGENO_FUNGO_BACTERIA'
+  | 'SUBSTRATO_DRENAGEM'
+  | 'CLIMA_TEMPERATURA'
+  | 'INDETERMINADA';
+
+export interface DiagnosticHypothesis {
+  causeName: string;                     // Ex: "Asfixia radicular por retenção excessiva de água"
+  category: DiagnosticCategory;
+  probability: 'PROVAVEL' | 'POSSIVEL' | 'MENOS_PROVAVEL';
+  visualEvidence: string[];              // Evidências observadas nas fotos
+  physiologicalMechanism: string;        // Explicação botânica simples
+  specificAction: string;                // Ação corretiva ligada a esta hipótese
+}
+
+export interface PlantDiagnosisResult {
+  id: string;
+  createdAt: string;
+  plantSpecies?: string;
+  plantName?: string;
+
+  // Resumo
+  conditionSummary: string;
+  overallHealthStatus: 'BOM' | 'ALERTA' | 'CRITICO' | 'INDETERMINADO';
+  confidenceLevel: DiagnosticConfidence;
+  confidenceReasoning: string;
+
+  // 4 Pilares de Informação
+  visualEvidence: string[];              // 1. Evidências observadas nas fotos
+  userReportedContext: string[];         // 2. Informações fornecidas pelo tutor
+  hypotheses: DiagnosticHypothesis[];    // 3. Hipóteses da IA ordenadas por probabilidade
+  missingInfoNeeded: string[];           // 4. Informações faltantes a verificar
+
+  // Plano de Ação
+  actionPlan: {
+    immediateSteps: string[];
+    ongoingAdjustments: string[];
+  };
+  whatToAvoid: string[];                 // Contraindicações claras
+  consultSpecialistAlert?: string;       // Orientação para consultar agrônomo/especialista
+  suggestedStatusChange?: 'HEALTHY' | 'NEEDS_CARE' | 'DORMANT' | 'RECOVERING' | null;
+  disclaimer: string;
+}
+
+export interface PlantDiagnosisRequest {
+  imagesBase64: string[];                // 1 a 3 fotos
+  imagesMetadata?: Array<{
+    slot: 'general' | 'leaf' | 'stem_substrate';
+    label: string;
+  }>;
+  plantContext?: {
+    plantId?: string;
+    species?: string;
+    name?: string;
+    environmentName?: string;
+    wateringFrequency?: string;
+    sunlightType?: string;
+    lastWatered?: string;
+    substrate?: string;
+  };
+  userSymptoms?: {
+    selectedSymptoms?: string[];
+    soilStateNow?: 'MUITO_SECO' | 'UMIDO' | 'ENCHARCADO' | 'NAO_TENHO_CERTEZA';
+    potHasDrainageHoles?: 'SIM' | 'NAO' | 'NAO_SEI';
+    environmentNotes?: string;
+    additionalDetails?: string;
+  };
 }
 

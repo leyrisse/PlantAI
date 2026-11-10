@@ -28,8 +28,9 @@ import {
   Save,
   Trash2,
   ShieldAlert,
+  Stethoscope,
 } from 'lucide-react';
-import { PlantStructuredCare, CareSchedule } from '../types';
+import { PlantStructuredCare, CareSchedule, PlantDiagnosisResult } from '../types';
 import {
   getOrInitializeStructuredCare,
   deriveStructuredCareFromGuide,
@@ -41,6 +42,7 @@ import {
 } from '../utils/careUtils';
 import { PlantCareFormFields } from './PlantCareFormFields';
 import { SpeciesCareAccordion } from './SpeciesCareAccordion';
+import { PlantDiagnosisModal } from './PlantDiagnosisModal';
 
 interface PlantProfileModalProps {
   plant: Plant;
@@ -57,6 +59,12 @@ interface PlantProfileModalProps {
     careGuide?: SpeciesCareGuide
   ) => void;
   onDeletePlant?: (plantId: string) => void;
+  onSaveDiagnosis?: (
+    plantId: string,
+    diagnosis: PlantDiagnosisResult,
+    newStatus?: Plant['status']
+  ) => Promise<{ savedInSupabase: boolean }>;
+  onShowToast?: (message: string) => void;
 }
 
 export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
@@ -69,11 +77,17 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
   onUpdatePlantCareGuide,
   onUpdatePlantCare,
   onDeletePlant,
+  onSaveDiagnosis,
+  onShowToast,
 }) => {
   const [activeTab, setActiveTab] = useState<'TIMELINE' | 'CARE_GUIDE' | 'TUTORS' | 'TRANSFER'>('CARE_GUIDE');
   const [currentCareGuide, setCurrentCareGuide] = useState<SpeciesCareGuide | undefined>(plant.careGuide);
   const [isGeneratingGuide, setIsGeneratingGuide] = useState(false);
   const [guideError, setGuideError] = useState<string | null>(null);
+
+  // Diagnosis Modal states
+  const [isDiagnosisModalOpen, setIsDiagnosisModalOpen] = useState(false);
+  const [inspectingDiagnosis, setInspectingDiagnosis] = useState<PlantDiagnosisResult | undefined>(undefined);
 
   // Structured Care and Edit mode state
   const [structuredCare, setStructuredCare] = useState<PlantStructuredCare>(() => getOrInitializeStructuredCare(plant));
@@ -239,6 +253,26 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
     setTransferSuccess(true);
   };
 
+  const handleSaveDiagnosisModal = async (
+    diag: PlantDiagnosisResult,
+    newStatus?: Plant['status']
+  ) => {
+    if (onSaveDiagnosis) {
+      return onSaveDiagnosis(plant.id, diag, newStatus);
+    }
+    const today = getLocalTodayDateStr();
+    onAddTimelineEvent(plant.id, {
+      date: today,
+      type: 'DIAGNOSIS',
+      title: `Diagnóstico: ${diag.hypotheses[0]?.causeName || 'Avaliação Fitossanitária'}`,
+      description: `${diag.conditionSummary} Ações imediatas: ${diag.actionPlan.immediateSteps.slice(0, 2).join('; ')}.`,
+      authorName: plant.tutors[0]?.name || 'Tutor Responsável',
+      authorRole: plant.tutors[0]?.role || 'Tutor',
+      diagnosisData: diag,
+    });
+    return { savedInSupabase: false };
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fadeIn">
       <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl border border-stone-200 space-y-0 my-auto">
@@ -301,31 +335,47 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
               </div>
 
               {/* Direct Care Action Buttons */}
-              {onLogCareTask && (
-                <div className="flex items-center gap-1.5 bg-[#1f291f]/90 p-1.5 rounded-2xl border border-[#D4AF37]/40 backdrop-blur-xs">
-                  <button
-                    onClick={() => onLogCareTask(plant.id, 'WATER')}
-                    className="px-2.5 py-1 bg-[#A68069] hover:bg-[#8e6c57] text-[#F5F5F0] rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all"
-                  >
-                    <Droplets className="w-3 h-3 text-[#D4AF37]" />
-                    Regar
-                  </button>
-                  <button
-                    onClick={() => onLogCareTask(plant.id, 'FERTILIZE')}
-                    className="px-2.5 py-1 bg-[#5A5A40] hover:bg-[#484833] text-[#F5F5F0] rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all"
-                  >
-                    <Sprout className="w-3 h-3 text-[#D4AF37]" />
-                    Adubar
-                  </button>
-                  <button
-                    onClick={() => onLogCareTask(plant.id, 'PRUNE')}
-                    className="px-2.5 py-1 bg-[#2D3A2D] hover:bg-[#182318] text-[#F5F5F0] rounded-xl text-[11px] font-bold flex items-center gap-1 border border-[#5A5A40] shadow-2xs transition-all"
-                  >
-                    <Scissors className="w-3 h-3 text-[#D4AF37]" />
-                    Podar
-                  </button>
-                </div>
-              )}
+              <div className="flex items-center gap-1.5 bg-[#1f291f]/90 p-1.5 rounded-2xl border border-[#D4AF37]/40 backdrop-blur-xs">
+                {onLogCareTask && (
+                  <>
+                    <button
+                      onClick={() => onLogCareTask(plant.id, 'WATER')}
+                      className="px-2.5 py-1 bg-[#A68069] hover:bg-[#8e6c57] text-[#F5F5F0] rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all"
+                    >
+                      <Droplets className="w-3 h-3 text-[#D4AF37]" />
+                      Regar
+                    </button>
+                    <button
+                      onClick={() => onLogCareTask(plant.id, 'FERTILIZE')}
+                      className="px-2.5 py-1 bg-[#5A5A40] hover:bg-[#484833] text-[#F5F5F0] rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all"
+                    >
+                      <Sprout className="w-3 h-3 text-[#D4AF37]" />
+                      Adubar
+                    </button>
+                    <button
+                      onClick={() => onLogCareTask(plant.id, 'PRUNE')}
+                      className="px-2.5 py-1 bg-[#2D3A2D] hover:bg-[#182318] text-[#F5F5F0] rounded-xl text-[11px] font-bold flex items-center gap-1 border border-[#5A5A40] shadow-2xs transition-all"
+                    >
+                      <Scissors className="w-3 h-3 text-[#D4AF37]" />
+                      Podar
+                    </button>
+                  </>
+                )}
+
+                {/* Botão Diagnosticar Saúde com IA */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInspectingDiagnosis(undefined);
+                    setIsDiagnosisModalOpen(true);
+                  }}
+                  className="px-2.5 py-1 bg-[#D4AF37] hover:bg-[#c29e2f] text-[#2D3A2D] rounded-xl text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                  title="Investigar Doenças e Saúde da Planta com IA"
+                >
+                  <Stethoscope className="w-3 h-3 text-[#2D3A2D]" />
+                  Diagnóstico
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -872,18 +922,49 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
                 {plant.timeline.map((evt) => (
                   <div key={evt.id} className="relative space-y-2 group">
                     {/* Bullet */}
-                    <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-[#2D3A2D] ring-4 ring-[#F5F5F0] flex items-center justify-center text-[#D4AF37]" />
+                    <div className="absolute -left-[31px] top-0 w-4 h-4 rounded-full bg-[#2D3A2D] ring-4 ring-[#F5F5F0] flex items-center justify-center text-[#D4AF37]">
+                      {evt.type === 'DIAGNOSIS' && <Stethoscope className="w-2.5 h-2.5 text-[#D4AF37]" />}
+                    </div>
 
-                    <div className="bg-white p-5 rounded-3xl border border-[#5A5A40]/20 shadow-2xs space-y-2">
+                    <div className={`p-5 rounded-3xl border shadow-2xs space-y-2 ${
+                      evt.type === 'DIAGNOSIS' ? 'bg-[#FAF8F5] border-amber-200' : 'bg-white border-[#5A5A40]/20'
+                    }`}>
                       <div className="flex items-center justify-between text-xs text-[#5A5A40]">
                         <span className="font-bold text-[#A68069]">{evt.date}</span>
-                        <span className="font-bold text-[#2D3A2D] bg-[#F5F5F0] px-2.5 py-0.5 rounded-md border border-[#5A5A40]/15">
-                          Por: {evt.authorName}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          {evt.type === 'DIAGNOSIS' && (
+                            <span className="font-bold text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-md border border-amber-200">
+                              Diagnóstico Fitossanitário
+                            </span>
+                          )}
+                          <span className="font-bold text-[#2D3A2D] bg-[#F5F5F0] px-2.5 py-0.5 rounded-md border border-[#5A5A40]/15">
+                            Por: {evt.authorName}
+                          </span>
+                        </div>
                       </div>
 
                       <h4 className="font-serif font-bold text-[#2D3A2D] text-base">{evt.title}</h4>
-                      <p className="text-xs text-[#2D3A2D] leading-relaxed">{evt.description}</p>
+                      <p className="text-xs text-[#2D3A2D] leading-relaxed whitespace-pre-line">{evt.description}</p>
+
+                      {/* Botão Ver Laudo Completo se o evento possui diagnosisData */}
+                      {evt.diagnosisData && (
+                        <div className="pt-2 flex items-center justify-between border-t border-[#5A5A40]/10 mt-2">
+                          <span className="text-[11px] text-[#5A5A40] italic">
+                            Laudo arquivado com 4 pilares de análise
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInspectingDiagnosis(evt.diagnosisData);
+                              setIsDiagnosisModalOpen(true);
+                            }}
+                            className="text-xs font-bold bg-[#2D3A2D] hover:bg-[#1f291f] text-[#F5F5F0] px-3 py-1.5 rounded-xl border border-[#D4AF37]/40 shadow-2xs flex items-center gap-1 transition-all cursor-pointer"
+                          >
+                            <Stethoscope className="w-3.5 h-3.5 text-[#D4AF37]" />
+                            Ver Laudo Completo
+                          </button>
+                        </div>
+                      )}
 
                       {evt.photoUrl && (
                         <img
@@ -1056,6 +1137,19 @@ export const PlantProfileModal: React.FC<PlantProfileModalProps> = ({
         )}
 
       </div>
+
+      {/* Modal de Diagnóstico Fitossanitário da Planta */}
+      <PlantDiagnosisModal
+        isOpen={isDiagnosisModalOpen}
+        onClose={() => {
+          setIsDiagnosisModalOpen(false);
+          setInspectingDiagnosis(undefined);
+        }}
+        plant={plant}
+        existingDiagnosis={inspectingDiagnosis}
+        onSaveToTimeline={handleSaveDiagnosisModal}
+        onShowToast={onShowToast || ((msg) => console.log(msg))}
+      />
     </div>
   );
 };

@@ -16,6 +16,7 @@ import {
   Droplets,
   Sun,
   ShieldAlert,
+  Stethoscope,
 } from 'lucide-react';
 import {
   PlantNetCandidate,
@@ -23,8 +24,11 @@ import {
   SpeciesCareGuide,
   InitialPlantData,
   WishListItem,
+  PlantDiagnosisResult,
 } from '../types';
 import { SpeciesCareAccordion } from './SpeciesCareAccordion';
+import { compressImage, validateImageFile } from '../utils/imageUtils';
+import { PlantDiagnosisModal } from './PlantDiagnosisModal';
 
 interface CameraModuleProps {
   onAddToGarden: (plantData: InitialPlantData) => void;
@@ -40,6 +44,7 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
   onShowToast,
 }) => {
   const [viewState, setViewState] = useState<ViewState>('CAMERA');
+  const [isDiagnosisModalOpen, setIsDiagnosisModalOpen] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -159,46 +164,6 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
     };
   }, [viewState]);
 
-  // Image compression utility
-  const compressImage = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const maxDim = 1200;
-          let width = img.width;
-          let height = img.height;
-
-          if (width > maxDim || height > maxDim) {
-            if (width > height) {
-              height = Math.round((height * maxDim) / width);
-              width = maxDim;
-            } else {
-              width = Math.round((width * maxDim) / height);
-              height = maxDim;
-            }
-          }
-
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) {
-            resolve(e.target?.result as string);
-            return;
-          }
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.88));
-        };
-        img.onerror = () => reject(new Error('Falha ao processar arquivo de imagem'));
-        img.src = e.target?.result as string;
-      };
-      reader.onerror = () => reject(new Error('Erro na leitura do arquivo'));
-      reader.readAsDataURL(file);
-    });
-  };
-
   // Handle capture snapshot from live video
   const handleCapturePhoto = () => {
     if (!videoRef.current) return;
@@ -220,8 +185,15 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const validation = validateImageFile(file);
+    if (!validation.valid) {
+      onShowToast(validation.error || 'Formato de imagem não suportado');
+      e.target.value = '';
+      return;
+    }
+
     try {
-      const dataUrl = await compressImage(file);
+      const dataUrl = await compressImage(file, 1200, 0.88);
       stopCamera();
       runIdentification(dataUrl);
     } catch (err: any) {
@@ -362,6 +334,17 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
     onShowToast(`⭐ "${identifiedResult.popularName || identifiedResult.scientificName}" salva no Jardim Futuro!`);
   };
 
+  // Action 3: Adicionar ao jardim vindo do diagnóstico de saúde
+  const handleAddToGardenFromDiagnosis = (diagnosis: PlantDiagnosisResult) => {
+    setIsDiagnosisModalOpen(false);
+    onAddToGarden({
+      species: diagnosis.plantSpecies || 'Espécie Sob Investigação',
+      name: diagnosis.plantName || diagnosis.plantSpecies || 'Minha Planta em Tratamento',
+      scientificName: diagnosis.plantSpecies,
+      popularName: diagnosis.plantName,
+    });
+  };
+
   return (
     <div className="relative w-full max-w-2xl mx-auto rounded-3xl overflow-hidden shadow-2xl bg-black text-white border border-[#5A5A40]/40">
       
@@ -380,16 +363,26 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
       {viewState === 'CAMERA' && (
         <div className="relative flex flex-col justify-between h-[75vh] min-h-[520px] max-h-[780px] bg-black">
           
-          {/* Top Bar: Organ Pills */}
+          {/* Top Bar: Mode & Organ Pills */}
           <div className="absolute top-0 left-0 right-0 z-20 p-4 bg-linear-to-b from-black/80 via-black/40 to-transparent flex flex-col gap-2">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5 drop-shadow-md">
                 <Camera className="w-3.5 h-3.5" />
                 Câmera Botânica
               </span>
-              <span className="text-[11px] text-white/75 bg-black/40 backdrop-blur-md px-2.5 py-0.5 rounded-full border border-white/10">
-                Aponte para a planta
-              </span>
+
+              {/* Botão Diagnosticar Saúde Avulso */}
+              <button
+                type="button"
+                onClick={() => {
+                  stopCamera();
+                  setIsDiagnosisModalOpen(true);
+                }}
+                className="text-[11px] font-bold bg-[#D4AF37] hover:bg-[#c29e2f] text-[#2D3A2D] px-3 py-1 rounded-full border border-[#D4AF37] shadow-md transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
+              >
+                <Stethoscope className="w-3.5 h-3.5" />
+                Diagnosticar Saúde
+              </button>
             </div>
 
             {/* Organ Selector Pills */}
@@ -890,6 +883,17 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
 
         </div>
       )}
+
+      {/* Modal de Diagnóstico Fitossanitário Avulso */}
+      <PlantDiagnosisModal
+        isOpen={isDiagnosisModalOpen}
+        onClose={() => {
+          setIsDiagnosisModalOpen(false);
+          startCamera();
+        }}
+        onAddToGardenFromDiagnosis={handleAddToGardenFromDiagnosis}
+        onShowToast={onShowToast}
+      />
 
     </div>
   );

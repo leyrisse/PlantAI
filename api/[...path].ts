@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 export const app = express();
+export const maxDuration = 60;
 
 // Compatibility middleware for Vercel Serverless Functions:
 // When running as a Vercel Serverless Function, Vercel may have already consumed
@@ -37,6 +38,7 @@ const API_PREFIXES = [
   "/weather",
   "/species-care-guide",
   "/analyze-decision",
+  "/diagnose-plant",
   "/ai",
 ];
 
@@ -221,6 +223,504 @@ Responda ESTRITAMENTE no formato JSON com a estrutura solicitada em Português d
   }
 });
 
+// =========================================================================
+// DIAGNÓSTICO FITOSSANITÁRIO (PLANT HEALTH DIAGNOSIS VIA GEMINI MULTIMODAL)
+// =========================================================================
+app.post(["/api/diagnose-plant", "/diagnose-plant"], async (req, res) => {
+  const reqStart = Date.now();
+  try {
+    const apiKey = (process.env.GEMINI_API_KEY || "").trim();
+    if (!apiKey) {
+      return res.status(500).json({
+        error: "A chave GEMINI_API_KEY não está configurada no servidor. Configure a chave no painel da Vercel ou Secrets.",
+        code: "MISSING_API_KEY",
+      });
+    }
+
+    const { imagesBase64, imagesMetadata, plantContext, userSymptoms } = req.body || {};
+
+    if (!Array.isArray(imagesBase64) || imagesBase64.length === 0) {
+      return res.status(400).json({
+        error: "Pelo menos uma fotografia (Foto 1) é obrigatória para o diagnóstico de saúde.",
+        code: "MISSING_IMAGE_DATA",
+      });
+    }
+
+    if (imagesBase64.length > 3) {
+      return res.status(400).json({
+        error: "O diagnóstico suporta no máximo 3 fotografias por consulta.",
+        code: "TOO_MANY_IMAGES",
+      });
+    }
+
+    // Process and validate 1 to 3 images
+    const imageParts: Array<{ inlineData: { mimeType: string; data: string } }> = [];
+    let totalBytes = 0;
+
+    for (let i = 0; i < imagesBase64.length; i++) {
+      const rawImg = imagesBase64[i];
+      if (!rawImg || typeof rawImg !== "string") {
+        return res.status(400).json({
+          error: `A fotografia ${i + 1} enviada é inválida.`,
+          code: "INVALID_IMAGE_ITEM",
+        });
+      }
+
+      let cleanBase64 = rawImg.trim();
+      let detectedMime = "image/jpeg";
+
+      const dataUriMatch = cleanBase64.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,(.+)$/s);
+      if (dataUriMatch) {
+        detectedMime = dataUriMatch[1];
+        cleanBase64 = dataUriMatch[2].trim();
+      }
+
+      cleanBase64 = cleanBase64.replace(/\s/g, "");
+
+      if (cleanBase64.length < 50) {
+        return res.status(400).json({
+          error: `A fotografia ${i + 1} contém dados insuficientes ou corrompidos.`,
+          code: "CORRUPTED_IMAGE_DATA",
+        });
+      }
+
+      const allowedMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+      const normalizedMime = detectedMime.toLowerCase();
+      const finalMime = allowedMimes.includes(normalizedMime)
+        ? normalizedMime === "image/jpg" ? "image/jpeg" : normalizedMime
+        : "image/jpeg";
+
+      const buf = Buffer.from(cleanBase64, "base64");
+      totalBytes += buf.length;
+
+      imageParts.push({
+        inlineData: {
+          mimeType: finalMime,
+          data: cleanBase64,
+        },
+      });
+    }
+
+    // Maximum combined decoded binary size: 4MB (well within Vercel's 4.5MB limit)
+    if (totalBytes > 4 * 1024 * 1024) {
+      return res.status(400).json({
+        error: "O tamanho total combinado das imagens excede o limite de 4MB. Por favor, envie fotos compactadas.",
+        code: "PAYLOAD_TOO_LARGE",
+      });
+    }
+
+    // Parse contextual information
+    const species = plantContext?.species ? String(plantContext.species).trim() : "";
+    const plantName = plantContext?.name ? String(plantContext.name).trim() : "";
+    const envName = plantContext?.environmentName ? String(plantContext.environmentName).trim() : "";
+    const wateringFreq = plantContext?.wateringFrequency ? String(plantContext.wateringFrequency).trim() : "";
+    const sunlight = plantContext?.sunlightType ? String(plantContext.sunlightType).trim() : "";
+    const lastWatered = plantContext?.lastWatered ? String(plantContext.lastWatered).trim() : "";
+    const substrate = plantContext?.substrate ? String(plantContext.substrate).trim() : "";
+
+    const symptomsList = Array.isArray(userSymptoms?.selectedSymptoms) && userSymptoms.selectedSymptoms.length > 0
+      ? userSymptoms.selectedSymptoms.join(", ")
+      : "Nenhum sintoma pré-selecionado pelo usuário (análise puramente visual)";
+    const soilState = userSymptoms?.soilStateNow || "Não informado";
+    const drainage = userSymptoms?.potHasDrainageHoles || "Não informado";
+    const envNotes = userSymptoms?.environmentNotes ? String(userSymptoms.environmentNotes).trim() : "";
+    const details = userSymptoms?.additionalDetails ? String(userSymptoms.additionalDetails).trim() : "";
+
+    const prompt = `Você é o Médico Botânico e Fitopatologista Sênior do aplicativo "PlantAI".
+Sua missão é realizar uma investigação fitossanitária criteriosa, humana e cientificamente honesta sobre a saúde da planta com base nas fotografias e no contexto fornecido.
+
+=== DADOS DE ENTRADA ===
+- Espécie conhecida: ${species ? `"${species}"` : "Espécie não cadastrada/desconhecida"}
+- Nome afetivo: ${plantName ? `"${plantName}"` : "Não informado"}
+- Ambiente habitual: ${envName || "Não informado"}
+- Frequência habitual de rega: ${wateringFreq || "Não informada"}
+- Exposição solar habitual: ${sunlight || "Não informada"}
+- Última rega registrada: ${lastWatered || "Não informada"}
+- Substrato utilizado: ${substrate || "Não informado"}
+- Sintomas relatados pelo tutor: ${symptomsList}
+- Estado atual do solo relatado: ${soilState}
+- Presença de orifícios de drenagem no vaso: ${drainage}
+- Observações de ambiente: ${envNotes || "Nenhuma"}
+- Quantidade de imagens analisadas: ${imageParts.length}
+${imageParts.map((_, idx) => {
+  const meta = Array.isArray(imagesMetadata) && imagesMetadata[idx];
+  return `  * Imagem ${idx + 1}: ${meta?.label ? meta.label : `Foto ${idx + 1}`}`;
+}).join("\n")}
+
+=== DIRETRIZES FITOSSANITÁRIAS E DE PRECAUÇÃO (RIGOR BOTÂNICO) ===
+1. AVALIAÇÃO DA QUALIDADE DAS FOTOGRAFIAS:
+   - Se as fotografias forem escuras, borradas, sem foco ou não mostrarem as partes afetadas, você DEVE classificar:
+     * overallHealthStatus = "INDETERMINADO"
+     * confidenceLevel = "INCONCLUSIVA"
+     * confidenceReasoning: explique claramente o motivo visual (ex: foto desfocada ou iluminação insuficiente).
+     * missingInfoNeeded: liste exatamente quais ângulos e detalhes o usuário deve fotografar para permitir um diagnóstico.
+   - NUNCA invente doenças se a imagem não fornecer evidências suficientes.
+
+2. PRIORIDADE A FATORES CULTURAIS E ABIÓTICOS:
+   - Mais de 80% dos problemas em plantas domésticas decorrem de erros de manejo (excesso de rega, deficiência de drenagem com asfixia radicular, falta ou excesso de luz, ar seco, choque térmico).
+   - Avalie sempre essas causas primeiro, correlacionando a espécie com o relato de rega e drenagem.
+   - Só formule hipóteses de pragas ou patógenos fúngicos/bacterianos se houver sintomas visuais inequívocos (ex: esporulação, halos concêntricos, teias de ácaro, colônias de cochonilha). Nunca afirme como certeza absoluta caso haja ambiguidade.
+
+3. RECOMENDAÇÕES SOBRE ADUBAÇÃO (FERTILIZANTES):
+   - Nunca use contraindicações universais automáticas.
+   - Se recomendar cautela ou suspensão da fertilização, justifique botânica e especificamente (ex: raízes sob estresse hídrico ou com perda de radículas não conseguem absorver sais minerais; ou planta em dormência sazonal; ou necessidade de lixiviação por excesso de sais).
+
+4. RECOMENDAÇÕES SOBRE IRRIGAÇÃO:
+   - Não dê ordens cegas de calendário (ex: "fique 15 dias sem regar").
+   - Prescreva checagem tátil do solo (ex: "Aguarde os primeiros 3 a 4 cm do substrato secarem completamente antes de aplicar nova rega").
+
+5. ESTRUTURAÇÃO DA RESPOSTA:
+   - "visualEvidence": liste apenas o que você REALMENTE enxerga nas fotos (ex: "Clorose intervenal nas folhas basais", "Bordas necróticas secas").
+   - "userReportedContext": resuma o que o tutor informou que ajudou a nortear a análise.
+   - "hypotheses": causas prováveis ordenadas da mais provável para a menos provável.
+   - "missingInfoNeeded": orientações práticas do que o tutor precisa checar presencialmente (ex: verificar furos no fundo do vaso, olhar sob as folhas).
+   - "actionPlan": immediateSteps (o que fazer agora/hoje) e ongoingAdjustments (mudanças na rotina).
+   - "whatToAvoid": o que NÃO fazer para não piorar a planta.
+   - "consultSpecialistAlert": quando procurar agrônomo/floricultura especializada caso o problema fuja do controle.
+   - "suggestedStatusChange": sugira "NEEDS_CARE", "RECOVERING", "HEALTHY" ou null se indiferente.
+   - "disclaimer": aviso ético de que é uma análise orientativa por IA e não substitui inspeção presencial.
+
+Responda ESTRITAMENTE em formato JSON de acordo com o esquema definido.`;
+
+    const contents = {
+      parts: [...imageParts, { text: prompt }],
+    };
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        timeout: 22000,
+        headers: { "User-Agent": "aistudio-build" },
+      },
+    });
+
+    const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
+    let geminiResponse: any = null;
+    let lastError: any = null;
+
+    for (const model of candidateModels) {
+      try {
+        console.log(`[DIAGNOSE-PLANT] Tentando análise fitossanitária com ${model} (${imageParts.length} fotos)...`);
+        const perModelTimeout = 11000;
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("TIMEOUT_EXCEEDED")), perModelTimeout)
+        );
+
+        geminiResponse = await Promise.race([
+          ai.models.generateContent({
+            model,
+            contents,
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  conditionSummary: { type: Type.STRING },
+                  overallHealthStatus: {
+                    type: Type.STRING,
+                    enum: ["BOM", "ALERTA", "CRITICO", "INDETERMINADO"],
+                  },
+                  confidenceLevel: {
+                    type: Type.STRING,
+                    enum: ["ALTA", "MODERADA", "BAIXA", "INCONCLUSIVA"],
+                  },
+                  confidenceReasoning: { type: Type.STRING },
+                  visualEvidence: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                  },
+                  userReportedContext: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                  },
+                  hypotheses: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        causeName: { type: Type.STRING },
+                        category: {
+                          type: Type.STRING,
+                          enum: [
+                            "IRRIGACAO",
+                            "ILUMINACAO",
+                            "NUTRICAO",
+                            "PRAGA",
+                            "PATOGENO_FUNGO_BACTERIA",
+                            "SUBSTRATO_DRENAGEM",
+                            "CLIMA_TEMPERATURA",
+                            "INDETERMINADA",
+                          ],
+                        },
+                        probability: {
+                          type: Type.STRING,
+                          enum: ["PROVAVEL", "POSSIVEL", "MENOS_PROVAVEL"],
+                        },
+                        visualEvidence: {
+                          type: Type.ARRAY,
+                          items: { type: Type.STRING },
+                        },
+                        physiologicalMechanism: { type: Type.STRING },
+                        specificAction: { type: Type.STRING },
+                      },
+                      required: [
+                        "causeName",
+                        "category",
+                        "probability",
+                        "visualEvidence",
+                        "physiologicalMechanism",
+                        "specificAction",
+                      ],
+                    },
+                  },
+                  missingInfoNeeded: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                  },
+                  actionPlan: {
+                    type: Type.OBJECT,
+                    properties: {
+                      immediateSteps: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                      },
+                      ongoingAdjustments: {
+                        type: Type.ARRAY,
+                        items: { type: Type.STRING },
+                      },
+                    },
+                    required: ["immediateSteps", "ongoingAdjustments"],
+                  },
+                  whatToAvoid: {
+                    type: Type.ARRAY,
+                    items: { type: Type.STRING },
+                  },
+                  consultSpecialistAlert: { type: Type.STRING },
+                  suggestedStatusChange: {
+                    type: Type.STRING,
+                    enum: ["HEALTHY", "NEEDS_CARE", "DORMANT", "RECOVERING", "NONE"],
+                  },
+                  disclaimer: { type: Type.STRING },
+                },
+                required: [
+                  "conditionSummary",
+                  "overallHealthStatus",
+                  "confidenceLevel",
+                  "confidenceReasoning",
+                  "visualEvidence",
+                  "userReportedContext",
+                  "hypotheses",
+                  "missingInfoNeeded",
+                  "actionPlan",
+                  "whatToAvoid",
+                  "disclaimer",
+                ],
+              },
+            },
+          }),
+          timeoutPromise,
+        ]);
+
+        if (geminiResponse?.text) {
+          console.log(`[DIAGNOSE-PLANT] Sucesso com ${model} em ${Date.now() - reqStart}ms.`);
+          break;
+        }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[DIAGNOSE-PLANT] Falha na tentativa com ${model}:`, err?.message || err);
+        const errMsg = String(err?.message || "").toLowerCase();
+        const isTransient =
+          errMsg.includes("503") ||
+          errMsg.includes("504") ||
+          errMsg.includes("deadline") ||
+          errMsg.includes("unavailable") ||
+          errMsg.includes("429") ||
+          errMsg.includes("timeout") ||
+          errMsg.includes("network") ||
+          errMsg.includes("fetch failed");
+        if (!isTransient && !errMsg.includes("timeout_exceeded")) {
+          break;
+        }
+      }
+    }
+
+    if (!geminiResponse?.text) {
+      console.warn("[DIAGNOSE-PLANT] Ativando síntese fitossanitária botânica resiliente por indisponibilidade transitória da IA:", lastError?.message);
+
+      const isOverwatered =
+        soilState === "ENCHARCADO" ||
+        drainage === "NAO" ||
+        symptomsList.includes("amareladas") ||
+        symptomsList.includes("amolecidos");
+
+      const isUnderwatered =
+        soilState === "MUITO_SECO" ||
+        symptomsList.includes("murchas") ||
+        symptomsList.includes("queimadas");
+
+      const hasPests = symptomsList.includes("Insetos") || symptomsList.includes("teias");
+
+      const hasLeafSpots = symptomsList.includes("Manchas") || symptomsList.includes("necrose");
+
+      const fallbackHypotheses: any[] = [];
+
+      if (isOverwatered) {
+        fallbackHypotheses.push({
+          causeName: "Possível asfixia radicular e saturação hídrica do substrato",
+          category: "IRRIGACAO",
+          probability: "POSSIVEL",
+          visualEvidence: ["Nenhuma observação visual confirmada pela IA; hipótese formulada com base no relato de solo úmido/encharcado e folhas amareladas."],
+          physiologicalMechanism: "O excesso de água no vaso expulsa o oxigênio dos poros do solo, asfixiando as raízes e impedindo a respiração celular.",
+          specificAction: "Suspender as regas imediatamente até que os primeiros 4 cm do solo sequem; assegurar que o vaso possua orifícios de drenagem livres.",
+        });
+      }
+
+      if (isUnderwatered) {
+        fallbackHypotheses.push({
+          causeName: "Possível déficit hídrico ou baixa umidade relativa do ar",
+          category: "IRRIGACAO",
+          probability: "POSSIVEL",
+          visualEvidence: ["Nenhuma observação visual confirmada pela IA; hipótese formulada com base no relato de solo seco ou folhas caídas."],
+          physiologicalMechanism: "A perda de água por transpiração foliar excede a absorção radicular, provocando perda de turgidez nas células.",
+          specificAction: "Realizar rega lenta e abundante até umedecer todo o torrão, descartando o excesso de água do prato após 15 minutos.",
+        });
+      }
+
+      if (hasPests) {
+        fallbackHypotheses.push({
+          causeName: "Possível infestação por pragas domésticas (cochonilhas, ácaros ou tripes)",
+          category: "PRAGA",
+          probability: "POSSIVEL",
+          visualEvidence: ["Nenhuma observação visual confirmada pela IA; hipótese formulada com base no relato de insetos ou teias."],
+          physiologicalMechanism: "Insetos sugadores extraem a seiva elaborada, debilitando o tecido vegetal e favorecendo infecções oportunistas.",
+          specificAction: "Isolar a planta de outras espécies e efetuar limpeza mecânica com algodão embebido em calda de sabão neutro.",
+        });
+      }
+
+      if (hasLeafSpots) {
+        fallbackHypotheses.push({
+          causeName: "Possível lesão foliar ou estresse ambiental",
+          category: "PATOGENO_FUNGO_BACTERIA",
+          probability: "POSSIVEL",
+          visualEvidence: ["Nenhuma observação visual confirmada pela IA; hipótese formulada com base no relato de manchas ou necroses foliares."],
+          physiologicalMechanism: "Patógenos oportunistas ou estresse térmico/solar provocam danos celulares em tecidos foliares fragilizados.",
+          specificAction: "Remover folhas com dano severo usando tesoura esterilizada e evitar molhar a folhagem durante as regas.",
+        });
+      }
+
+      if (fallbackHypotheses.length === 0) {
+        fallbackHypotheses.push({
+          causeName: "Avaliação inconclusiva por indisponibilidade temporária da IA",
+          category: "INDETERMINADA",
+          probability: "MENOS_PROVAVEL",
+          visualEvidence: ["A análise visual por visão computacional não pôde ser executada devido à indisponibilidade temporária do serviço de IA."],
+          physiologicalMechanism: "Sem análise visual das fotos e sem sintomas específicos relatados, não é prudente inferir causas patológicas.",
+          specificAction: "Inspecione presencialmente o substrato e a parte inferior das folhas, e repita o diagnóstico fotográfico em instantes.",
+        });
+      }
+
+      const hasUserInputs =
+        (Array.isArray(userSymptoms?.selectedSymptoms) && userSymptoms.selectedSymptoms.length > 0) ||
+        soilState !== "Não informado" ||
+        drainage !== "Não informado";
+
+      const fallbackResult = {
+        id: `diag-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        createdAt: new Date().toISOString(),
+        plantSpecies: species || undefined,
+        plantName: plantName || undefined,
+        conditionSummary: hasUserInputs
+          ? `Diagnóstico visual temporariamente indisponível. Orientações preliminares baseadas exclusivamente no histórico e sintomas relatados para ${species || "sua planta"}.`
+          : "Diagnóstico por imagem temporariamente indisponível nos servidores de IA. Não foi possível analisar visualmente as fotografias.",
+        overallHealthStatus: "INDETERMINADO" as const,
+        confidenceLevel: "INCONCLUSIVA" as const,
+        confidenceReasoning: "A análise multimodal automática enfrentou indisponibilidade temporária nos servidores da IA. Este laudo não representa uma avaliação visual das fotografias, consistindo em orientações preliminares baseadas unicamente no histórico informado pelo tutor. Recomenda-se realizar uma nova tentativa com as fotografias assim que o serviço estiver restabelecido.",
+        visualEvidence: [
+          "A análise visual por visão computacional não pôde ser executada devido à indisponibilidade temporária do serviço de IA.",
+          "Nenhuma evidência visual foi inspecionada ou confirmada automaticamente nas imagens enviadas.",
+        ],
+        userReportedContext: [
+          `Espécie: ${species || "Não informada"}`,
+          `Sintomas relatados: ${symptomsList}`,
+          `Solo atual informado: ${soilState}`,
+          `Vaso com drenagem: ${drainage}`,
+        ],
+        hypotheses: fallbackHypotheses,
+        missingInfoNeeded: [
+          "Repetir o diagnóstico fotográfico quando os servidores de IA estiverem disponíveis.",
+          "Verificar se o fundo do vaso possui orifícios de drenagem desobstruídos.",
+          "Checar com os dedos ou palito a umidade no meio do torrão de raízes.",
+          "Examinar o verso das folhas contra a luz procurando pequenos insetos ou pontuações.",
+        ],
+        actionPlan: {
+          immediateSteps: [
+            fallbackHypotheses[0].specificAction,
+            "Tentar novamente o diagnóstico por imagem no PlantAI em alguns instantes para validação visual completa.",
+          ],
+          ongoingAdjustments: [
+            "Só regar quando os primeiros 3 a 4 cm do solo estiverem comprovadamente secos ao toque.",
+            "Garantir luminosidade adequada para a espécie sem exposição direta ao sol forte.",
+          ],
+        },
+        whatToAvoid: [
+          "Não aplicar fertilizantes concentrados enquanto o diagnóstico visual não for confirmado.",
+          "Não deixar água acumulada no pratinho sob o vaso.",
+        ],
+        consultSpecialistAlert: "Se os sintomas piorarem rapidamente ou houver amolecimento generalizado das hastes, consulte um profissional agrônomo ou floricultura especializada.",
+        suggestedStatusChange: null,
+        disclaimer: "Atenção: A análise visual por IA não pôde ser processada nesta consulta por indisponibilidade transitória dos servidores. As hipóteses e recomendações acima baseiam-se unicamente nas informações de texto e sintomas fornecidos pelo tutor, sem validação fotográfica.",
+      };
+
+      return res.json({
+        success: true,
+        data: fallbackResult,
+      });
+    }
+
+    const rawParsed = JSON.parse(geminiResponse.text);
+
+    // Normalize suggestedStatusChange from "NONE" to null
+    let suggestedStatus = rawParsed.suggestedStatusChange;
+    if (suggestedStatus === "NONE" || !suggestedStatus) {
+      suggestedStatus = null;
+    }
+
+    const diagnosisResult = {
+      id: `diag-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      createdAt: new Date().toISOString(),
+      plantSpecies: species || undefined,
+      plantName: plantName || undefined,
+      conditionSummary: rawParsed.conditionSummary || "",
+      overallHealthStatus: rawParsed.overallHealthStatus || "INDETERMINADO",
+      confidenceLevel: rawParsed.confidenceLevel || "INCONCLUSIVA",
+      confidenceReasoning: rawParsed.confidenceReasoning || "",
+      visualEvidence: Array.isArray(rawParsed.visualEvidence) ? rawParsed.visualEvidence : [],
+      userReportedContext: Array.isArray(rawParsed.userReportedContext) ? rawParsed.userReportedContext : [],
+      hypotheses: Array.isArray(rawParsed.hypotheses) ? rawParsed.hypotheses : [],
+      missingInfoNeeded: Array.isArray(rawParsed.missingInfoNeeded) ? rawParsed.missingInfoNeeded : [],
+      actionPlan: {
+        immediateSteps: Array.isArray(rawParsed.actionPlan?.immediateSteps) ? rawParsed.actionPlan.immediateSteps : [],
+        ongoingAdjustments: Array.isArray(rawParsed.actionPlan?.ongoingAdjustments) ? rawParsed.actionPlan.ongoingAdjustments : [],
+      },
+      whatToAvoid: Array.isArray(rawParsed.whatToAvoid) ? rawParsed.whatToAvoid : [],
+      consultSpecialistAlert: rawParsed.consultSpecialistAlert || undefined,
+      suggestedStatusChange: suggestedStatus,
+      disclaimer: rawParsed.disclaimer || "Este laudo é uma análise preliminar baseada em inteligência artificial e não substitui o parecer presencial de um agrônomo ou botânico.",
+    };
+
+    return res.json({
+      success: true,
+      data: diagnosisResult,
+    });
+  } catch (err: any) {
+    console.error("[DIAGNOSE-PLANT EXCEPTION]", err);
+    return res.status(500).json({
+      error: err?.message || "Erro interno ao processar o diagnóstico fitossanitário.",
+      code: "INTERNAL_ERROR",
+    });
+  }
+});
+
 // Species Care Guide Generation Endpoint via Gemini
 app.post("/api/species-care-guide", async (req, res) => {
   try {
@@ -296,7 +796,7 @@ DIRETRIZES DE CONTEÚDO E SEGURANÇA:
 
 Responda ESTRITAMENTE em formato JSON.`;
 
-    const candidateModels = ["gemini-2.5-flash", "gemini-3.8-flash", "gemini-3.6-flash"];
+    const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
     let geminiResponse: any = null;
     let lastError: any = null;
 
@@ -1002,7 +1502,7 @@ Responda ESTRITAMENTE em formato JSON.`;
 
     const textPart = { text: prompt };
 
-    const candidateModels = ["gemini-3.6-flash", "gemini-3.8-flash"];
+    const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
     let geminiResponse: any = null;
     let lastError: any = null;
 

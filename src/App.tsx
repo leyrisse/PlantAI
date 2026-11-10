@@ -13,6 +13,7 @@ import {
   InitialPlantData,
   WeatherLocation,
   CurrentWeather,
+  PlantDiagnosisResult,
 } from './types';
 import {
   INITIAL_PLANTS,
@@ -50,6 +51,7 @@ import {
   loadLocalPlants,
   saveLocalPlants,
 } from './services/plantService';
+import { isSupabaseConfigured } from './services/supabaseClient';
 import { AlertTriangle, Compass, MapPin, X, Database } from 'lucide-react';
 
 const BASE_STORAGE_KEY_PLANTS = 'jardim_plants_v1';
@@ -501,6 +503,64 @@ export default function App() {
     });
   };
 
+  const handleSaveDiagnosis = async (
+    plantId: string,
+    diagnosis: PlantDiagnosisResult,
+    newStatus?: Plant['status']
+  ): Promise<{ savedInSupabase: boolean }> => {
+    const today = getLocalTodayDateStr();
+    const newEvent: TimelineEvent = {
+      id: `diag-evt-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      date: today,
+      type: 'DIAGNOSIS',
+      title: `Diagnóstico: ${diagnosis.hypotheses[0]?.causeName || 'Avaliação Fitossanitária'}`,
+      description: `${diagnosis.conditionSummary}\n\nAções imediatas recomendadas:\n${diagnosis.actionPlan.immediateSteps.slice(0, 3).map((s, i) => `${i + 1}. ${s}`).join('\n')}`,
+      authorName: 'Médico Botânico (IA)',
+      authorRole: 'Diagnóstico Fitossanitário',
+      diagnosisData: diagnosis,
+    };
+
+    // 1. Atualizar o estado da interface sem efeitos colaterais de rede no callback
+    let updatedPlant: Plant | null = null;
+    let nextPlants: Plant[] = [];
+
+    setPlants((prev) => {
+      nextPlants = prev.map((p) => {
+        if (p.id !== plantId) return p;
+        updatedPlant = {
+          ...p,
+          status: newStatus ? newStatus : p.status,
+          timeline: [newEvent, ...(p.timeline || [])],
+        };
+        return updatedPlant;
+      });
+      return nextPlants;
+    });
+
+    if (!updatedPlant) {
+      return { savedInSupabase: false };
+    }
+
+    // 2. Garantir persistência imediata no armazenamento local (offline-first)
+    saveLocalPlants(nextPlants, auth.userId);
+
+    // 3. Operação de rede isolada fora do setPlants: aguarda a Promise real do Supabase.
+    // NOTA DE CONCORRÊNCIA: O Supabase persiste o array timeline na coluna JSONB (Last-Write-Wins).
+    // Atualizações concorrentes em diferentes dispositivos/abas aplicam a última escrita recebida.
+    let isSavedInDb = false;
+    if (isSupabaseConfigured() && auth.userId) {
+      try {
+        const res = await updateUserPlant(updatedPlant, auth.userId);
+        isSavedInDb = Boolean(res?.savedInSupabase);
+      } catch (err) {
+        console.warn('Falha na comunicação com Supabase; diagnóstico mantido no dispositivo:', err);
+        isSavedInDb = false;
+      }
+    }
+
+    return { savedInSupabase: isSavedInDb };
+  };
+
   const handleAddTutor = (plantId: string, tutor: Omit<Tutor, 'id' | 'joinedDate'>) => {
     const newTutor: Tutor = {
       ...tutor,
@@ -944,6 +1004,8 @@ export default function App() {
           onUpdatePlantCareGuide={handleUpdatePlantCareGuide}
           onUpdatePlantCare={handleUpdatePlantCare}
           onDeletePlant={handlePromptDeletePlant}
+          onSaveDiagnosis={handleSaveDiagnosis}
+          onShowToast={showToast}
         />
       )}
 
