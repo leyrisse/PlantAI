@@ -34,6 +34,7 @@ interface CameraModuleProps {
   onAddToGarden: (plantData: InitialPlantData) => void;
   onAddToWishList: (item: WishListItem) => void;
   onShowToast: (message: string) => void;
+  initialCameraMode?: 'IDENTIFY' | 'DIAGNOSE';
 }
 
 type ViewState = 'CAMERA' | 'IDENTIFYING' | 'RESULT' | 'ERROR';
@@ -42,9 +43,18 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
   onAddToGarden,
   onAddToWishList,
   onShowToast,
+  initialCameraMode,
 }) => {
   const [viewState, setViewState] = useState<ViewState>('CAMERA');
+  const [cameraMode, setCameraMode] = useState<'IDENTIFY' | 'DIAGNOSE'>(
+    initialCameraMode || 'IDENTIFY'
+  );
   const [isDiagnosisModalOpen, setIsDiagnosisModalOpen] = useState(false);
+  const [initialDiagnosisPhoto, setInitialDiagnosisPhoto] = useState<string | null>(null);
+  const [initialDiagnosisPlantContext, setInitialDiagnosisPlantContext] = useState<{
+    species?: string;
+    name?: string;
+  } | undefined>(undefined);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>('environment');
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -176,7 +186,14 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
       stopCamera();
-      runIdentification(dataUrl);
+
+      if (cameraMode === 'DIAGNOSE') {
+        setInitialDiagnosisPhoto(dataUrl);
+        setInitialDiagnosisPlantContext(undefined);
+        setIsDiagnosisModalOpen(true);
+      } else {
+        runIdentification(dataUrl);
+      }
     }
   };
 
@@ -195,7 +212,14 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
     try {
       const dataUrl = await compressImage(file, 1200, 0.88);
       stopCamera();
-      runIdentification(dataUrl);
+
+      if (cameraMode === 'DIAGNOSE') {
+        setInitialDiagnosisPhoto(dataUrl);
+        setInitialDiagnosisPlantContext(undefined);
+        setIsDiagnosisModalOpen(true);
+      } else {
+        runIdentification(dataUrl);
+      }
     } catch (err: any) {
       onShowToast(err.message || 'Erro ao processar imagem da galeria');
     } finally {
@@ -363,51 +387,63 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
       {viewState === 'CAMERA' && (
         <div className="relative flex flex-col justify-between h-[75vh] min-h-[520px] max-h-[780px] bg-black">
           
-          {/* Top Bar: Mode & Organ Pills */}
-          <div className="absolute top-0 left-0 right-0 z-20 p-4 bg-linear-to-b from-black/80 via-black/40 to-transparent flex flex-col gap-2">
+          {/* Top Bar: Mode Status & Organ Pills */}
+          <div className="absolute top-0 left-0 right-0 z-20 p-4 bg-linear-to-b from-black/85 via-black/50 to-transparent flex flex-col gap-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-[#D4AF37] uppercase tracking-wider flex items-center gap-1.5 drop-shadow-md">
                 <Camera className="w-3.5 h-3.5" />
-                Câmera Botânica
+                {cameraMode === 'DIAGNOSE' ? 'Câmera • Diagnóstico de Saúde' : 'Câmera • Identificar Espécie'}
               </span>
 
-              {/* Botão Diagnosticar Saúde Avulso */}
+              {/* Botão Diagnosticar Saúde Avulso / Modal Direto */}
               <button
                 type="button"
                 onClick={() => {
                   stopCamera();
+                  setInitialDiagnosisPhoto(null);
+                  setInitialDiagnosisPlantContext(undefined);
                   setIsDiagnosisModalOpen(true);
                 }}
                 className="text-[11px] font-bold bg-[#D4AF37] hover:bg-[#c29e2f] text-[#2D3A2D] px-3 py-1 rounded-full border border-[#D4AF37] shadow-md transition-all active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                title="Abrir formulário de diagnóstico fitossanitário"
               >
                 <Stethoscope className="w-3.5 h-3.5" />
-                Diagnosticar Saúde
+                Formulário Fitossanitário
               </button>
             </div>
 
-            {/* Organ Selector Pills */}
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1">
-              {[
-                { id: 'auto', label: 'Automático' },
-                { id: 'leaf', label: 'Folha' },
-                { id: 'flower', label: 'Flor' },
-                { id: 'fruit', label: 'Fruto' },
-                { id: 'bark', label: 'Caule' },
-              ].map((org) => (
-                <button
-                  key={org.id}
-                  type="button"
-                  onClick={() => setSelectedOrgan(org.id)}
-                  className={`text-[11px] px-3 py-1 rounded-full border font-medium transition-all backdrop-blur-md ${
-                    selectedOrgan === org.id
-                      ? 'bg-[#D4AF37] text-[#2D3A2D] border-[#D4AF37] font-bold shadow-md'
-                      : 'bg-black/40 text-white/80 border-white/20 hover:bg-black/60'
-                  }`}
-                >
-                  {org.label}
-                </button>
-              ))}
-            </div>
+            {/* Sub-bar: Organ Selector Pills (Identify mode) OR Diagnostic Advice (Diagnose mode) */}
+            {cameraMode === 'IDENTIFY' ? (
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                {[
+                  { id: 'auto', label: 'Automático' },
+                  { id: 'leaf', label: 'Folha' },
+                  { id: 'flower', label: 'Flor' },
+                  { id: 'fruit', label: 'Fruto' },
+                  { id: 'bark', label: 'Caule' },
+                ].map((org) => (
+                  <button
+                    key={org.id}
+                    type="button"
+                    onClick={() => setSelectedOrgan(org.id)}
+                    className={`text-[11px] px-3 py-1 rounded-full border font-medium transition-all backdrop-blur-md ${
+                      selectedOrgan === org.id
+                        ? 'bg-[#D4AF37] text-[#2D3A2D] border-[#D4AF37] font-bold shadow-md'
+                        : 'bg-black/40 text-white/80 border-white/20 hover:bg-black/60'
+                    }`}
+                  >
+                    {org.label}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 bg-[#2D3A2D]/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-[#D4AF37]/50 text-xs text-[#F5F5F0]">
+                <Stethoscope className="w-4 h-4 text-[#D4AF37] shrink-0" />
+                <span className="text-[11px] text-white/90">
+                  Enquadre a planta inteira, folhas afetadas ou base do caule para analisar a saúde com IA.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Central Live Video Stream */}
@@ -425,15 +461,19 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
             {/* Viewfinder Target Framing Overlay */}
             {isCameraActive && (
               <div className="absolute inset-0 pointer-events-none flex items-center justify-center p-8">
-                <div className="relative w-64 h-64 sm:w-80 sm:h-80 border-2 border-dashed border-[#D4AF37]/50 rounded-3xl flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+                <div className={`relative w-64 h-64 sm:w-80 sm:h-80 border-2 border-dashed rounded-3xl flex items-center justify-center shadow-[0_0_50px_rgba(0,0,0,0.5)] ${
+                  cameraMode === 'DIAGNOSE' ? 'border-[#D4AF37]/70' : 'border-[#D4AF37]/50'
+                }`}>
                   {/* Framing Reticle Corners */}
                   <div className="absolute -top-1 -left-1 w-6 h-6 border-t-3 border-l-3 border-[#D4AF37] rounded-tl-xl" />
                   <div className="absolute -top-1 -right-1 w-6 h-6 border-t-3 border-r-3 border-[#D4AF37] rounded-tr-xl" />
                   <div className="absolute -bottom-1 -left-1 w-6 h-6 border-b-3 border-l-3 border-[#D4AF37] rounded-bl-xl" />
                   <div className="absolute -bottom-1 -right-1 w-6 h-6 border-b-3 border-r-3 border-[#D4AF37] rounded-br-xl" />
 
-                  <span className="text-[11px] text-white/80 bg-black/60 backdrop-blur-md px-3 py-1 rounded-full border border-white/15 animate-pulse text-center">
-                    Enquadre a planta aqui
+                  <span className="text-[11px] text-white/90 bg-black/70 backdrop-blur-md px-3.5 py-1 rounded-full border border-white/20 animate-pulse text-center">
+                    {cameraMode === 'DIAGNOSE'
+                      ? 'Foco nos sintomas (folhas/caule/geral)'
+                      : 'Enquadre a planta aqui'}
                   </span>
                 </div>
               </div>
@@ -477,45 +517,87 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
             )}
           </div>
 
-          {/* Bottom Controls Bar (Smartphone Camera Style) */}
-          <div className="absolute bottom-0 left-0 right-0 z-20 p-6 bg-linear-to-t from-black/95 via-black/70 to-transparent flex items-center justify-around">
+          {/* Bottom Controls Bar (Smartphone Camera Style with Mode Switcher) */}
+          <div className="absolute bottom-0 left-0 right-0 z-20 pb-6 pt-3 px-6 bg-linear-to-t from-black/95 via-black/80 to-transparent flex flex-col items-center gap-3">
             
-            {/* Gallery Shortcut (Bottom-Left) */}
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-12 h-12 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-md border border-white/25 flex flex-col items-center justify-center transition-all active:scale-90 shadow-lg"
-              title="Galeria de Fotos"
-            >
-              <ImageIcon className="w-5 h-5 text-white" />
-              <span className="text-[8px] font-medium text-white/70 mt-0.5 leading-none">Galeria</span>
-            </button>
-
-            {/* Big Shutter Capture Button (Center-Bottom) */}
-            <button
-              type="button"
-              onClick={handleCapturePhoto}
-              disabled={!isCameraActive}
-              className="group relative w-20 h-20 rounded-full border-4 border-white flex items-center justify-center transition-all active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_25px_rgba(255,255,255,0.3)] cursor-pointer"
-              title="Tirar Foto"
-            >
-              <div className="w-16 h-16 rounded-full bg-white group-hover:bg-[#D4AF37] transition-colors shadow-inner" />
-            </button>
-
-            {/* Flip Camera Button (Bottom-Right) */}
-            {hasMultipleCameras || isCameraActive ? (
+            {/* Mode Switcher Carousel: Identificar espécie vs Diagnosticar saúde */}
+            <div className="flex items-center gap-1.5 bg-black/60 backdrop-blur-md p-1 rounded-full border border-white/20 shadow-lg">
               <button
                 type="button"
-                onClick={handleToggleFacingMode}
-                className="w-12 h-12 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-md border border-white/25 flex flex-col items-center justify-center transition-all active:scale-90 shadow-lg"
-                title="Alternar Câmera Frontal / Traseira"
+                onClick={() => setCameraMode('IDENTIFY')}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  cameraMode === 'IDENTIFY'
+                    ? 'bg-[#D4AF37] text-[#2D3A2D] shadow-md scale-102'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
               >
-                <FlipHorizontal className="w-5 h-5 text-white" />
-                <span className="text-[8px] font-medium text-white/70 mt-0.5 leading-none">Inverter</span>
+                <Camera className="w-3.5 h-3.5" />
+                <span>Identificar espécie</span>
               </button>
-            ) : (
-              <div className="w-12 h-12" />
-            )}
+
+              <button
+                type="button"
+                onClick={() => setCameraMode('DIAGNOSE')}
+                className={`px-3.5 py-1.5 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  cameraMode === 'DIAGNOSE'
+                    ? 'bg-[#D4AF37] text-[#2D3A2D] shadow-md scale-102'
+                    : 'text-white/80 hover:text-white hover:bg-white/10'
+                }`}
+              >
+                <Stethoscope className="w-3.5 h-3.5" />
+                <span>Diagnosticar saúde</span>
+              </button>
+            </div>
+
+            {/* Shutter, Gallery, Flip Row */}
+            <div className="w-full flex items-center justify-around">
+              {/* Gallery Shortcut (Bottom-Left) */}
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-12 h-12 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-md border border-white/25 flex flex-col items-center justify-center transition-all active:scale-90 shadow-lg cursor-pointer"
+                title="Galeria de Fotos"
+              >
+                <ImageIcon className="w-5 h-5 text-white" />
+                <span className="text-[8px] font-medium text-white/70 mt-0.5 leading-none">Galeria</span>
+              </button>
+
+              {/* Big Shutter Capture Button (Center-Bottom) */}
+              <button
+                type="button"
+                onClick={handleCapturePhoto}
+                disabled={!isCameraActive}
+                className={`group relative w-20 h-20 rounded-full border-4 flex items-center justify-center transition-all active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed shadow-[0_0_25px_rgba(255,255,255,0.3)] cursor-pointer ${
+                  cameraMode === 'DIAGNOSE' ? 'border-[#D4AF37]' : 'border-white'
+                }`}
+                title={cameraMode === 'DIAGNOSE' ? 'Fotografar para Diagnóstico Fitossanitário' : 'Fotografar para Identificar Espécie'}
+              >
+                <div className={`w-16 h-16 rounded-full transition-colors shadow-inner flex items-center justify-center ${
+                  cameraMode === 'DIAGNOSE'
+                    ? 'bg-[#D4AF37] text-[#2D3A2D]'
+                    : 'bg-white group-hover:bg-[#D4AF37]'
+                }`}>
+                  {cameraMode === 'DIAGNOSE' && (
+                    <Stethoscope className="w-7 h-7 text-[#2D3A2D]" />
+                  )}
+                </div>
+              </button>
+
+              {/* Flip Camera Button (Bottom-Right) */}
+              {hasMultipleCameras || isCameraActive ? (
+                <button
+                  type="button"
+                  onClick={handleToggleFacingMode}
+                  className="w-12 h-12 rounded-full bg-white/15 hover:bg-white/25 backdrop-blur-md border border-white/25 flex flex-col items-center justify-center transition-all active:scale-90 shadow-lg cursor-pointer"
+                  title="Alternar Câmera Frontal / Traseira"
+                >
+                  <FlipHorizontal className="w-5 h-5 text-white" />
+                  <span className="text-[8px] font-medium text-white/70 mt-0.5 leading-none">Inverter</span>
+                </button>
+              ) : (
+                <div className="w-12 h-12" />
+              )}
+            </div>
 
           </div>
 
@@ -725,6 +807,44 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
               </div>
             </div>
 
+            {/* Convite Visual Destacado para Diagnóstico de Saúde com IA */}
+            <div className="bg-linear-to-r from-amber-500/10 via-rose-500/10 to-amber-500/10 border-2 border-[#D4AF37]/60 rounded-3xl p-5 sm:p-6 shadow-sm space-y-3.5">
+              <div className="flex items-start gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-[#2D3A2D] text-[#D4AF37] flex items-center justify-center shrink-0 border border-[#D4AF37]/50 shadow-xs">
+                  <Stethoscope className="w-6 h-6 text-[#D4AF37]" />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <span className="inline-block text-[10px] font-bold uppercase tracking-wider bg-[#2D3A2D] text-[#D4AF37] px-2.5 py-0.5 rounded-full border border-[#D4AF37]/30">
+                    Avaliação Fitossanitária com IA
+                  </span>
+                  <h4 className="font-serif text-base sm:text-lg font-bold text-[#2D3A2D]">
+                    Sua planta apresenta manchas, folhas secas ou sinais de doença?
+                  </h4>
+                  <p className="text-xs text-[#5A5A40] leading-relaxed">
+                    Identificamos que esta espécie é <strong>{identifiedResult.popularName || identifiedResult.scientificName}</strong>. Você pode iniciar um diagnóstico fitossanitário com Gemini para analisar fungos, pragas, excesso de água ou estresse nutricional aproveitando a fotografia capturada.
+                  </p>
+                </div>
+              </div>
+
+              <div className="pt-1 flex flex-col sm:flex-row items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInitialDiagnosisPhoto(capturedPhotoUrl);
+                    setInitialDiagnosisPlantContext({
+                      species: identifiedResult.scientificName,
+                      name: identifiedResult.popularName || identifiedResult.scientificName,
+                    });
+                    setIsDiagnosisModalOpen(true);
+                  }}
+                  className="w-full sm:w-auto px-5 py-2.5 bg-[#2D3A2D] hover:bg-[#1f291f] text-[#F5F5F0] font-bold text-xs rounded-2xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 border border-[#D4AF37]/60 cursor-pointer"
+                >
+                  <Stethoscope className="w-4 h-4 text-[#D4AF37]" />
+                  <span>Diagnosticar saúde com IA</span>
+                </button>
+              </div>
+            </div>
+
             {/* Quick Care Recommendation Cards */}
             {identifiedResult.careGuide && (
               <div className="space-y-4">
@@ -884,12 +1004,18 @@ export const CameraModule: React.FC<CameraModuleProps> = ({
         </div>
       )}
 
-      {/* Modal de Diagnóstico Fitossanitário Avulso */}
+      {/* Modal de Diagnóstico Fitossanitário */}
       <PlantDiagnosisModal
         isOpen={isDiagnosisModalOpen}
+        initialPhotoUrl={initialDiagnosisPhoto}
+        initialPlantContext={initialDiagnosisPlantContext}
         onClose={() => {
           setIsDiagnosisModalOpen(false);
-          startCamera();
+          setInitialDiagnosisPhoto(null);
+          setInitialDiagnosisPlantContext(undefined);
+          if (viewState === 'CAMERA') {
+            startCamera();
+          }
         }}
         onAddToGardenFromDiagnosis={handleAddToGardenFromDiagnosis}
         onShowToast={onShowToast}

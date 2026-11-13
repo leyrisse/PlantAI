@@ -38,6 +38,7 @@ import { DecisionAnalyzerModule } from './components/DecisionAnalyzerModule';
 import { CareCalendarModule } from './components/CareCalendarModule';
 import { CameraModule } from './components/CameraModule';
 import { PlantProfileModal } from './components/PlantProfileModal';
+import { PlantDiagnosisModal } from './components/PlantDiagnosisModal';
 import { NewPlantModal } from './components/NewPlantModal';
 import { WeatherLocationModal } from './components/WeatherLocationModal';
 import { WelcomeModal } from './components/WelcomeModal';
@@ -384,6 +385,7 @@ export default function App() {
   const selectedPlant = plants.find((p) => p.id === selectedPlantId) || null;
 
   const [isNewPlantModalOpen, setIsNewPlantModalOpen] = useState(false);
+  const [isGlobalDiagnosisModalOpen, setIsGlobalDiagnosisModalOpen] = useState(false);
   const [pendingPlantInitialData, setPendingPlantInitialData] = useState<InitialPlantData | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -904,6 +906,7 @@ export default function App() {
             onLogCareTask={handleLogCareTask}
             onSelectPlant={(plant) => setSelectedPlantId(plant.id)}
             onNavigateToCare={() => setActiveTab('CARE')}
+            onOpenDiagnosis={() => setIsGlobalDiagnosisModalOpen(true)}
             location={weatherLocation}
             weather={currentWeather}
             isLoadingWeather={isRefreshingWeather}
@@ -1056,6 +1059,14 @@ export default function App() {
         onLocationRemoved={handleWeatherLocationRemoved}
         onRefreshWeather={handleRefreshWeather}
         isRefreshingWeather={isRefreshingWeather}
+      />
+
+      {/* Modal Global de Diagnóstico Fitossanitário Avulso */}
+      <PlantDiagnosisModal
+        isOpen={isGlobalDiagnosisModalOpen}
+        onClose={() => setIsGlobalDiagnosisModalOpen(false)}
+        onAddToGardenFromDiagnosis={handleOpenGardenFromIdentified}
+        onShowToast={showToast}
       />
 
     </div>

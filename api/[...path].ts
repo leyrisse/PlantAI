@@ -386,27 +386,162 @@ Responda ESTRITAMENTE em formato JSON de acordo com o esquema definido.`;
       parts: [...imageParts, { text: prompt }],
     };
 
+    const MAX_TOTAL_MS = 55000;
+    const PER_MODEL_TIMEOUT_MS = 25000;
+    const MIN_TIME_FOR_ATTEMPT_MS = 12000;
+
     const ai = new GoogleGenAI({
       apiKey,
       httpOptions: {
-        timeout: 22000,
+        timeout: 26000,
         headers: { "User-Agent": "aistudio-build" },
       },
     });
 
-    const candidateModels = ["gemini-3.8-flash", "gemini-3.6-flash"];
-    let geminiResponse: any = null;
-    let lastError: any = null;
+    type DiagnosisErrorType =
+      | "SERVICE_UNAVAILABLE"
+      | "RATE_LIMIT_EXCEEDED"
+      | "BAD_REQUEST"
+      | "AUTH_ERROR"
+      | "TIMEOUT"
+      | "INVALID_RESPONSE";
 
-    for (const model of candidateModels) {
+    interface ModelAttemptLog {
+      model: string;
+      httpStatus: number;
+      errorType: DiagnosisErrorType;
+      durationMs: number;
+      message: string;
+    }
+
+    const classifyModelError = (
+      err: any
+    ): { httpStatus: number; errorType: DiagnosisErrorType; retryable: boolean; safeMessage: string } => {
+      const rawMsg = String(err?.message || "");
+      const msgLower = rawMsg.toLowerCase();
+      const status = typeof err?.status === "number" ? err.status : 0;
+
+      if (msgLower.includes("invalid_response_schema") || msgLower.includes("json_parse_error")) {
+        return {
+          httpStatus: 502,
+          errorType: "INVALID_RESPONSE",
+          retryable: true,
+          safeMessage: "O modelo respondeu em formato incompatível ou JSON inválido.",
+        };
+      }
+
+      if (
+        msgLower.includes("timeout_exceeded") ||
+        status === 504 ||
+        msgLower.includes("deadline") ||
+        msgLower.includes("timeout")
+      ) {
+        return {
+          httpStatus: 504,
+          errorType: "TIMEOUT",
+          retryable: true,
+          safeMessage: "O modelo não respondeu dentro do prazo limite da tentativa.",
+        };
+      }
+
+      if (status === 429 || msgLower.includes("429") || msgLower.includes("resource_exhausted") || msgLower.includes("quota") || msgLower.includes("rate limit")) {
+        return {
+          httpStatus: 429,
+          errorType: "RATE_LIMIT_EXCEEDED",
+          retryable: true,
+          safeMessage: "Limite de requisições ou cota temporária da API atingida.",
+        };
+      }
+
+      if (status === 401 || status === 403 || msgLower.includes("401") || msgLower.includes("403") || msgLower.includes("permission_denied") || msgLower.includes("unauthenticated") || msgLower.includes("api key")) {
+        return {
+          httpStatus: status === 401 ? 401 : 403,
+          errorType: "AUTH_ERROR",
+          retryable: false,
+          safeMessage: "Falha de autenticação ou permissão na chave da API Gemini no servidor.",
+        };
+      }
+
+      if (status === 400 || msgLower.includes("400") || msgLower.includes("invalid_argument")) {
+        return {
+          httpStatus: 400,
+          errorType: "BAD_REQUEST",
+          retryable: false,
+          safeMessage: "Solicitação ou formato de imagem recusado pela API do modelo.",
+        };
+      }
+
+      if (
+        status === 503 ||
+        msgLower.includes("503") ||
+        msgLower.includes("unavailable") ||
+        msgLower.includes("high demand") ||
+        msgLower.includes("overloaded") ||
+        msgLower.includes("network") ||
+        msgLower.includes("fetch failed")
+      ) {
+        return {
+          httpStatus: 503,
+          errorType: "SERVICE_UNAVAILABLE",
+          retryable: true,
+          safeMessage: "Modelo temporariamente indisponível devido a alta demanda.",
+        };
+      }
+
+      return {
+        httpStatus: status >= 400 && status < 600 ? status : 503,
+        errorType: "SERVICE_UNAVAILABLE",
+        retryable: true,
+        safeMessage: rawMsg ? rawMsg.slice(0, 180) : "Falha na comunicação com o modelo de IA.",
+      };
+    };
+
+    const validateDiagnosisPayload = (parsed: any): boolean => {
+      if (!parsed || typeof parsed !== "object") return false;
+      const validHealth = ["BOM", "ALERTA", "CRITICO", "INDETERMINADO"].includes(parsed.overallHealthStatus);
+      const validConf = ["ALTA", "MODERADA", "BAIXA", "INCONCLUSIVA"].includes(parsed.confidenceLevel);
+      if (!validHealth || !validConf) return false;
+      if (typeof parsed.conditionSummary !== "string" || !parsed.conditionSummary.trim()) return false;
+      if (typeof parsed.confidenceReasoning !== "string" || !parsed.confidenceReasoning.trim()) return false;
+      if (!Array.isArray(parsed.visualEvidence)) return false;
+      if (!Array.isArray(parsed.hypotheses)) return false;
+      if (!parsed.actionPlan || !Array.isArray(parsed.actionPlan.immediateSteps) || !Array.isArray(parsed.actionPlan.ongoingAdjustments)) {
+        return false;
+      }
+      return true;
+    };
+
+    const candidateModels = ["gemini-4-hydrogen", "gemini-3.1-flash-lite"];
+    let validParsedResult: any = null;
+    let modelUsed: string | null = null;
+    const attempts: ModelAttemptLog[] = [];
+
+    for (let i = 0; i < candidateModels.length; i++) {
+      const model = candidateModels[i];
+      const elapsed = Date.now() - reqStart;
+      const remaining = MAX_TOTAL_MS - elapsed;
+
+      if (remaining < MIN_TIME_FOR_ATTEMPT_MS) {
+        console.warn(
+          `[DIAGNOSE-PLANT] Abortando tentativa com ${model}: tempo restante insuficiente (${remaining}ms < ${MIN_TIME_FOR_ATTEMPT_MS}ms).`
+        );
+        break;
+      }
+
+      const attemptBudget = Math.min(PER_MODEL_TIMEOUT_MS, remaining - 500);
+      const attemptStart = Date.now();
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+
       try {
-        console.log(`[DIAGNOSE-PLANT] Tentando análise fitossanitária com ${model} (${imageParts.length} fotos)...`);
-        const perModelTimeout = 11000;
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error("TIMEOUT_EXCEEDED")), perModelTimeout)
+        console.log(
+          `[DIAGNOSE-PLANT] Tentativa ${i + 1}/${candidateModels.length} com ${model} (${imageParts.length} foto(s), timeout ${attemptBudget}ms)...`
         );
 
-        geminiResponse = await Promise.race([
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error("TIMEOUT_EXCEEDED")), attemptBudget);
+        });
+
+        const geminiResponse: any = await Promise.race([
           ai.models.generateContent({
             model,
             contents,
@@ -521,166 +656,89 @@ Responda ESTRITAMENTE em formato JSON de acordo com o esquema definido.`;
           timeoutPromise,
         ]);
 
-        if (geminiResponse?.text) {
-          console.log(`[DIAGNOSE-PLANT] Sucesso com ${model} em ${Date.now() - reqStart}ms.`);
+        if (!geminiResponse?.text || typeof geminiResponse.text !== "string") {
+          throw new Error("INVALID_RESPONSE_SCHEMA: empty response text");
+        }
+
+        let parsed: any;
+        try {
+          parsed = JSON.parse(geminiResponse.text);
+        } catch {
+          throw new Error("JSON_PARSE_ERROR: invalid JSON from model");
+        }
+
+        if (!validateDiagnosisPayload(parsed)) {
+          throw new Error("INVALID_RESPONSE_SCHEMA: missing required diagnosis fields");
+        }
+
+        validParsedResult = parsed;
+        modelUsed = model;
+        const attemptDuration = Date.now() - attemptStart;
+        console.log(
+          `[DIAGNOSE-PLANT] Sucesso com ${model} em ${attemptDuration}ms (total ${Date.now() - reqStart}ms).`
+        );
+        break;
+      } catch (err: any) {
+        const attemptDuration = Date.now() - attemptStart;
+        const classified = classifyModelError(err);
+        attempts.push({
+          model,
+          httpStatus: classified.httpStatus,
+          errorType: classified.errorType,
+          durationMs: attemptDuration,
+          message: classified.safeMessage,
+        });
+        console.warn(
+          `[DIAGNOSE-PLANT] Falha em ${model} (${attemptDuration}ms) | Tipo: ${classified.errorType} | HTTP: ${classified.httpStatus} | Detalhe: ${err?.message || err}`
+        );
+
+        if (!classified.retryable) {
           break;
         }
-      } catch (err: any) {
-        lastError = err;
-        console.warn(`[DIAGNOSE-PLANT] Falha na tentativa com ${model}:`, err?.message || err);
-        const errMsg = String(err?.message || "").toLowerCase();
-        const isTransient =
-          errMsg.includes("503") ||
-          errMsg.includes("504") ||
-          errMsg.includes("deadline") ||
-          errMsg.includes("unavailable") ||
-          errMsg.includes("429") ||
-          errMsg.includes("timeout") ||
-          errMsg.includes("network") ||
-          errMsg.includes("fetch failed");
-        if (!isTransient && !errMsg.includes("timeout_exceeded")) {
-          break;
+      } finally {
+        if (timeoutHandle) {
+          clearTimeout(timeoutHandle);
         }
       }
     }
 
-    if (!geminiResponse?.text) {
-      console.warn("[DIAGNOSE-PLANT] Ativando síntese fitossanitária botânica resiliente por indisponibilidade transitória da IA:", lastError?.message);
+    if (!validParsedResult || !modelUsed) {
+      const lastAttempt = attempts[attempts.length - 1];
+      const finalErrorType = lastAttempt?.errorType || "SERVICE_UNAVAILABLE";
+      const finalHttpStatus = lastAttempt?.httpStatus || 503;
 
-      const isOverwatered =
-        soilState === "ENCHARCADO" ||
-        drainage === "NAO" ||
-        symptomsList.includes("amareladas") ||
-        symptomsList.includes("amolecidos");
-
-      const isUnderwatered =
-        soilState === "MUITO_SECO" ||
-        symptomsList.includes("murchas") ||
-        symptomsList.includes("queimadas");
-
-      const hasPests = symptomsList.includes("Insetos") || symptomsList.includes("teias");
-
-      const hasLeafSpots = symptomsList.includes("Manchas") || symptomsList.includes("necrose");
-
-      const fallbackHypotheses: any[] = [];
-
-      if (isOverwatered) {
-        fallbackHypotheses.push({
-          causeName: "Possível asfixia radicular e saturação hídrica do substrato",
-          category: "IRRIGACAO",
-          probability: "POSSIVEL",
-          visualEvidence: ["Nenhuma observação visual confirmada pela IA; hipótese formulada com base no relato de solo úmido/encharcado e folhas amareladas."],
-          physiologicalMechanism: "O excesso de água no vaso expulsa o oxigênio dos poros do solo, asfixiando as raízes e impedindo a respiração celular.",
-          specificAction: "Suspender as regas imediatamente até que os primeiros 4 cm do solo sequem; assegurar que o vaso possua orifícios de drenagem livres.",
-        });
-      }
-
-      if (isUnderwatered) {
-        fallbackHypotheses.push({
-          causeName: "Possível déficit hídrico ou baixa umidade relativa do ar",
-          category: "IRRIGACAO",
-          probability: "POSSIVEL",
-          visualEvidence: ["Nenhuma observação visual confirmada pela IA; hipótese formulada com base no relato de solo seco ou folhas caídas."],
-          physiologicalMechanism: "A perda de água por transpiração foliar excede a absorção radicular, provocando perda de turgidez nas células.",
-          specificAction: "Realizar rega lenta e abundante até umedecer todo o torrão, descartando o excesso de água do prato após 15 minutos.",
-        });
-      }
-
-      if (hasPests) {
-        fallbackHypotheses.push({
-          causeName: "Possível infestação por pragas domésticas (cochonilhas, ácaros ou tripes)",
-          category: "PRAGA",
-          probability: "POSSIVEL",
-          visualEvidence: ["Nenhuma observação visual confirmada pela IA; hipótese formulada com base no relato de insetos ou teias."],
-          physiologicalMechanism: "Insetos sugadores extraem a seiva elaborada, debilitando o tecido vegetal e favorecendo infecções oportunistas.",
-          specificAction: "Isolar a planta de outras espécies e efetuar limpeza mecânica com algodão embebido em calda de sabão neutro.",
-        });
-      }
-
-      if (hasLeafSpots) {
-        fallbackHypotheses.push({
-          causeName: "Possível lesão foliar ou estresse ambiental",
-          category: "PATOGENO_FUNGO_BACTERIA",
-          probability: "POSSIVEL",
-          visualEvidence: ["Nenhuma observação visual confirmada pela IA; hipótese formulada com base no relato de manchas ou necroses foliares."],
-          physiologicalMechanism: "Patógenos oportunistas ou estresse térmico/solar provocam danos celulares em tecidos foliares fragilizados.",
-          specificAction: "Remover folhas com dano severo usando tesoura esterilizada e evitar molhar a folhagem durante as regas.",
-        });
-      }
-
-      if (fallbackHypotheses.length === 0) {
-        fallbackHypotheses.push({
-          causeName: "Avaliação inconclusiva por indisponibilidade temporária da IA",
-          category: "INDETERMINADA",
-          probability: "MENOS_PROVAVEL",
-          visualEvidence: ["A análise visual por visão computacional não pôde ser executada devido à indisponibilidade temporária do serviço de IA."],
-          physiologicalMechanism: "Sem análise visual das fotos e sem sintomas específicos relatados, não é prudente inferir causas patológicas.",
-          specificAction: "Inspecione presencialmente o substrato e a parte inferior das folhas, e repita o diagnóstico fotográfico em instantes.",
-        });
-      }
-
-      const hasUserInputs =
-        (Array.isArray(userSymptoms?.selectedSymptoms) && userSymptoms.selectedSymptoms.length > 0) ||
-        soilState !== "Não informado" ||
-        drainage !== "Não informado";
-
-      const fallbackResult = {
-        id: `diag-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
-        createdAt: new Date().toISOString(),
-        plantSpecies: species || undefined,
-        plantName: plantName || undefined,
-        conditionSummary: hasUserInputs
-          ? `Diagnóstico visual temporariamente indisponível. Orientações preliminares baseadas exclusivamente no histórico e sintomas relatados para ${species || "sua planta"}.`
-          : "Diagnóstico por imagem temporariamente indisponível nos servidores de IA. Não foi possível analisar visualmente as fotografias.",
-        overallHealthStatus: "INDETERMINADO" as const,
-        confidenceLevel: "INCONCLUSIVA" as const,
-        confidenceReasoning: "A análise multimodal automática enfrentou indisponibilidade temporária nos servidores da IA. Este laudo não representa uma avaliação visual das fotografias, consistindo em orientações preliminares baseadas unicamente no histórico informado pelo tutor. Recomenda-se realizar uma nova tentativa com as fotografias assim que o serviço estiver restabelecido.",
-        visualEvidence: [
-          "A análise visual por visão computacional não pôde ser executada devido à indisponibilidade temporária do serviço de IA.",
-          "Nenhuma evidência visual foi inspecionada ou confirmada automaticamente nas imagens enviadas.",
-        ],
-        userReportedContext: [
-          `Espécie: ${species || "Não informada"}`,
-          `Sintomas relatados: ${symptomsList}`,
-          `Solo atual informado: ${soilState}`,
-          `Vaso com drenagem: ${drainage}`,
-        ],
-        hypotheses: fallbackHypotheses,
-        missingInfoNeeded: [
-          "Repetir o diagnóstico fotográfico quando os servidores de IA estiverem disponíveis.",
-          "Verificar se o fundo do vaso possui orifícios de drenagem desobstruídos.",
-          "Checar com os dedos ou palito a umidade no meio do torrão de raízes.",
-          "Examinar o verso das folhas contra a luz procurando pequenos insetos ou pontuações.",
-        ],
-        actionPlan: {
-          immediateSteps: [
-            fallbackHypotheses[0].specificAction,
-            "Tentar novamente o diagnóstico por imagem no PlantAI em alguns instantes para validação visual completa.",
-          ],
-          ongoingAdjustments: [
-            "Só regar quando os primeiros 3 a 4 cm do solo estiverem comprovadamente secos ao toque.",
-            "Garantir luminosidade adequada para a espécie sem exposição direta ao sol forte.",
-          ],
-        },
-        whatToAvoid: [
-          "Não aplicar fertilizantes concentrados enquanto o diagnóstico visual não for confirmado.",
-          "Não deixar água acumulada no pratinho sob o vaso.",
-        ],
-        consultSpecialistAlert: "Se os sintomas piorarem rapidamente ou houver amolecimento generalizado das hastes, consulte um profissional agrônomo ou floricultura especializada.",
-        suggestedStatusChange: null,
-        disclaimer: "Atenção: A análise visual por IA não pôde ser processada nesta consulta por indisponibilidade transitória dos servidores. As hipóteses e recomendações acima baseiam-se unicamente nas informações de texto e sintomas fornecidos pelo tutor, sem validação fotográfica.",
+      const userMessages: Record<DiagnosisErrorType, string> = {
+        SERVICE_UNAVAILABLE:
+          "O serviço de análise por imagem está temporariamente indisponível devido à alta demanda nos servidores de IA. Nenhuma análise visual foi realizada.",
+        RATE_LIMIT_EXCEEDED:
+          "O limite temporário de requisições da IA foi atingido. Nenhuma análise visual foi realizada. Aguarde alguns instantes e tente novamente.",
+        TIMEOUT:
+          "Os modelos de IA não responderam dentro do prazo limite ao processar as fotografias. Nenhuma análise visual foi realizada.",
+        INVALID_RESPONSE:
+          "A IA retornou uma resposta estruturalmente inválida e o laudo não pôde ser validado com segurança. Nenhuma análise visual foi realizada.",
+        AUTH_ERROR:
+          "Erro de autenticação ou permissão ao acessar a API Gemini no servidor. Verifique a configuração da chave.",
+        BAD_REQUEST:
+          "A solicitação ou o formato das imagens foi recusado pelo modelo de IA.",
       };
 
-      return res.json({
-        success: true,
-        data: fallbackResult,
+      console.error(
+        `[DIAGNOSE-PLANT] Análise não concluída após ${attempts.length} tentativa(s) em ${Date.now() - reqStart}ms | Último erro: ${finalErrorType} (HTTP ${finalHttpStatus})`
+      );
+
+      return res.status(finalHttpStatus).json({
+        success: false,
+        serviceUnavailable: true,
+        errorType: finalErrorType,
+        code: finalErrorType,
+        httpStatus: finalHttpStatus,
+        error: userMessages[finalErrorType],
+        attempts,
       });
     }
 
-    const rawParsed = JSON.parse(geminiResponse.text);
-
     // Normalize suggestedStatusChange from "NONE" to null
-    let suggestedStatus = rawParsed.suggestedStatusChange;
+    let suggestedStatus = validParsedResult.suggestedStatusChange;
     if (suggestedStatus === "NONE" || !suggestedStatus) {
       suggestedStatus = null;
     }
@@ -690,31 +748,41 @@ Responda ESTRITAMENTE em formato JSON de acordo com o esquema definido.`;
       createdAt: new Date().toISOString(),
       plantSpecies: species || undefined,
       plantName: plantName || undefined,
-      conditionSummary: rawParsed.conditionSummary || "",
-      overallHealthStatus: rawParsed.overallHealthStatus || "INDETERMINADO",
-      confidenceLevel: rawParsed.confidenceLevel || "INCONCLUSIVA",
-      confidenceReasoning: rawParsed.confidenceReasoning || "",
-      visualEvidence: Array.isArray(rawParsed.visualEvidence) ? rawParsed.visualEvidence : [],
-      userReportedContext: Array.isArray(rawParsed.userReportedContext) ? rawParsed.userReportedContext : [],
-      hypotheses: Array.isArray(rawParsed.hypotheses) ? rawParsed.hypotheses : [],
-      missingInfoNeeded: Array.isArray(rawParsed.missingInfoNeeded) ? rawParsed.missingInfoNeeded : [],
+      conditionSummary: validParsedResult.conditionSummary || "",
+      overallHealthStatus: validParsedResult.overallHealthStatus || "INDETERMINADO",
+      confidenceLevel: validParsedResult.confidenceLevel || "INCONCLUSIVA",
+      confidenceReasoning: validParsedResult.confidenceReasoning || "",
+      visualEvidence: Array.isArray(validParsedResult.visualEvidence) ? validParsedResult.visualEvidence : [],
+      userReportedContext: Array.isArray(validParsedResult.userReportedContext) ? validParsedResult.userReportedContext : [],
+      hypotheses: Array.isArray(validParsedResult.hypotheses) ? validParsedResult.hypotheses : [],
+      missingInfoNeeded: Array.isArray(validParsedResult.missingInfoNeeded) ? validParsedResult.missingInfoNeeded : [],
       actionPlan: {
-        immediateSteps: Array.isArray(rawParsed.actionPlan?.immediateSteps) ? rawParsed.actionPlan.immediateSteps : [],
-        ongoingAdjustments: Array.isArray(rawParsed.actionPlan?.ongoingAdjustments) ? rawParsed.actionPlan.ongoingAdjustments : [],
+        immediateSteps: Array.isArray(validParsedResult.actionPlan?.immediateSteps) ? validParsedResult.actionPlan.immediateSteps : [],
+        ongoingAdjustments: Array.isArray(validParsedResult.actionPlan?.ongoingAdjustments) ? validParsedResult.actionPlan.ongoingAdjustments : [],
       },
-      whatToAvoid: Array.isArray(rawParsed.whatToAvoid) ? rawParsed.whatToAvoid : [],
-      consultSpecialistAlert: rawParsed.consultSpecialistAlert || undefined,
+      whatToAvoid: Array.isArray(validParsedResult.whatToAvoid) ? validParsedResult.whatToAvoid : [],
+      consultSpecialistAlert: validParsedResult.consultSpecialistAlert || undefined,
       suggestedStatusChange: suggestedStatus,
-      disclaimer: rawParsed.disclaimer || "Este laudo é uma análise preliminar baseada em inteligência artificial e não substitui o parecer presencial de um agrônomo ou botânico.",
+      disclaimer:
+        validParsedResult.disclaimer ||
+        "Este laudo é uma análise preliminar baseada em inteligência artificial e não substitui o parecer presencial de um agrônomo ou botânico.",
     };
 
     return res.json({
       success: true,
       data: diagnosisResult,
+      meta: {
+        modelUsed,
+        durationMs: Date.now() - reqStart,
+        attemptsCount: attempts.length + 1,
+      },
     });
   } catch (err: any) {
     console.error("[DIAGNOSE-PLANT EXCEPTION]", err);
     return res.status(500).json({
+      success: false,
+      serviceUnavailable: true,
+      errorType: "INTERNAL_ERROR",
       error: err?.message || "Erro interno ao processar o diagnóstico fitossanitário.",
       code: "INTERNAL_ERROR",
     });

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   X,
   Camera,
@@ -35,6 +35,13 @@ interface PlantDiagnosisModalProps {
   plant?: Plant;
   // Optional pre-existing diagnosis result for read-only history viewing
   existingDiagnosis?: PlantDiagnosisResult;
+  // Optional initial photo pre-filled from camera capture or result screen
+  initialPhotoUrl?: string | null;
+  // Optional initial plant species context pre-filled from botanical identification
+  initialPlantContext?: {
+    species?: string;
+    name?: string;
+  };
   // Callback when saving the diagnosis to the plant's timeline
   onSaveToTimeline?: (
     diagnosis: PlantDiagnosisResult,
@@ -61,6 +68,8 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
   onClose,
   plant,
   existingDiagnosis,
+  initialPhotoUrl,
+  initialPlantContext,
   onSaveToTimeline,
   onAddToGardenFromDiagnosis,
   onShowToast,
@@ -114,11 +123,50 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
   const [diagnosisResult, setDiagnosisResult] = useState<PlantDiagnosisResult | null>(
     existingDiagnosis || null
   );
+  const [diagnosisMeta, setDiagnosisMeta] = useState<{
+    modelUsed?: string;
+    durationMs?: number;
+    attemptsCount?: number;
+  } | null>(null);
+  const [errorState, setErrorState] = useState<{
+    errorType: string;
+    httpStatus?: number;
+    message: string;
+    attempts?: Array<{
+      model: string;
+      httpStatus: number;
+      errorType: string;
+      durationMs: number;
+    }>;
+  } | null>(null);
   const [isSaved, setIsSaved] = useState<boolean>(Boolean(existingDiagnosis));
   const [isUpdatingStatus, setIsUpdatingStatus] = useState<boolean>(false);
   const [statusUpdated, setStatusUpdated] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Sync initial photo or existing diagnosis when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setErrorState(null);
+      if (existingDiagnosis) {
+        setDiagnosisResult(existingDiagnosis);
+        setDiagnosisMeta(null);
+        setIsSaved(true);
+      } else if (initialPhotoUrl) {
+        setPhotoSlots((prev) => {
+          if (prev[0]?.dataUrl === initialPhotoUrl) return prev;
+          const next = [...prev];
+          next[0] = {
+            dataUrl: initialPhotoUrl,
+            slot: FIXED_SLOTS[0].slot,
+            label: FIXED_SLOTS[0].label,
+          };
+          return next;
+        });
+      }
+    }
+  }, [isOpen, initialPhotoUrl, existingDiagnosis]);
 
   if (!isOpen) return null;
 
@@ -189,6 +237,8 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
     }
 
     setIsLoading(true);
+    setErrorState(null);
+    setDiagnosisMeta(null);
     setLoadingStep('Enviando fotografias otimizadas...');
 
     try {
@@ -209,6 +259,11 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
               lastWatered: plant.careSchedule?.lastWatered,
               substrate: plant.structuredCare?.substrate,
             }
+          : initialPlantContext
+          ? {
+              species: initialPlantContext.species,
+              name: initialPlantContext.name,
+            }
           : undefined,
         userSymptoms: {
           selectedSymptoms,
@@ -228,22 +283,52 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
 
       const json = await res.json().catch(() => null);
 
-      if (!res.ok) {
-        throw new Error(
-          json?.error || `Falha na análise fitossanitária (Status HTTP ${res.status}).`
-        );
-      }
+      if (!res.ok || json?.serviceUnavailable || !json?.success || !json?.data) {
+        const status = json?.httpStatus || res.status || 503;
+        const errType =
+          json?.errorType ||
+          json?.code ||
+          (status === 429
+            ? 'RATE_LIMIT_EXCEEDED'
+            : status === 504
+            ? 'TIMEOUT'
+            : status === 400
+            ? 'BAD_REQUEST'
+            : status === 401 || status === 403
+            ? 'AUTH_ERROR'
+            : !res.ok
+            ? 'SERVICE_UNAVAILABLE'
+            : 'INVALID_RESPONSE');
+        const errMsg =
+          json?.error ||
+          `Serviço temporariamente indisponível (Status HTTP ${status}). Nenhuma análise visual foi realizada.`;
 
-      if (!json?.success || !json?.data) {
-        throw new Error('A resposta do diagnóstico foi inválida.');
+        setErrorState({
+          errorType: errType,
+          httpStatus: status,
+          message: errMsg,
+          attempts: Array.isArray(json?.attempts) ? json.attempts : undefined,
+        });
+        onShowToast(errMsg);
+        return;
       }
 
       setDiagnosisResult(json.data as PlantDiagnosisResult);
+      setDiagnosisMeta(json.meta || null);
+      setErrorState(null);
       setIsSaved(false);
       setStatusUpdated(false);
     } catch (err: any) {
       console.error('Erro ao realizar diagnóstico:', err);
-      onShowToast(err?.message || 'Falha ao processar diagnóstico fitossanitário.');
+      const errMsg =
+        err?.message && err.message !== 'Failed to fetch'
+          ? err.message
+          : 'Não foi possível conectar ao servidor de diagnóstico. Verifique sua conexão e tente novamente.';
+      setErrorState({
+        errorType: 'NETWORK_ERROR',
+        message: errMsg,
+      });
+      onShowToast(errMsg);
     } finally {
       setIsLoading(false);
     }
@@ -285,6 +370,8 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
   // Reset to create another diagnosis
   const handleReset = () => {
     setDiagnosisResult(null);
+    setDiagnosisMeta(null);
+    setErrorState(null);
     setPhotoSlots([null, null, null]);
     setSelectedSymptoms([]);
     setSoilState('');
@@ -292,6 +379,26 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
     setAdditionalNotes('');
     setIsSaved(false);
     setStatusUpdated(false);
+  };
+
+  const getErrorHeading = (errorType: string) => {
+    switch (errorType) {
+      case 'RATE_LIMIT_EXCEEDED':
+        return 'Limite de Requisições Atingido';
+      case 'TIMEOUT':
+        return 'Tempo Limite Excedido na Análise';
+      case 'AUTH_ERROR':
+        return 'Erro de Autenticação no Serviço de IA';
+      case 'BAD_REQUEST':
+        return 'Imagem ou Solicitação Recusada';
+      case 'INVALID_RESPONSE':
+        return 'Resposta Estruturalmente Inválida';
+      case 'NETWORK_ERROR':
+        return 'Falha de Conexão com o Servidor';
+      case 'SERVICE_UNAVAILABLE':
+      default:
+        return 'Serviço Temporariamente Indisponível';
+    }
   };
 
   // Helper for confidence badge colors
@@ -368,11 +475,15 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
                 )}
               </div>
               <h2 className="font-serif text-lg sm:text-xl font-bold text-[#F5F5F0] leading-tight">
-                {plant ? `Investigação Fitossanitária: ${plant.name}` : 'Investigação Fitossanitária de Planta'}
+                {plant
+                  ? `Investigação Fitossanitária: ${plant.name}`
+                  : initialPlantContext?.name || initialPlantContext?.species
+                  ? `Investigação Fitossanitária: ${initialPlantContext.name || initialPlantContext.species}`
+                  : 'Investigação Fitossanitária de Planta'}
               </h2>
-              {plant && (
-                <p className="text-xs text-[#F5F5F0]/70 italic font-serif">
-                  {plant.species}
+              {(plant?.species || initialPlantContext?.species) && (
+                <p className="text-xs text-[#D4AF37] italic font-serif">
+                  {plant?.species || initialPlantContext?.species}
                 </p>
               )}
             </div>
@@ -392,7 +503,7 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
           {/* ========================================================= */}
           {/* VIEW A: FORMULÁRIO DE CAPTURA (Se ainda não há resultado)  */}
           {/* ========================================================= */}
-          {!diagnosisResult && !isLoading && (
+          {!diagnosisResult && !isLoading && !errorState && (
             <div className="space-y-6">
               {/* Instruções */}
               <div className="bg-[#2D3A2D]/5 border border-[#5A5A40]/20 rounded-2xl p-4 text-xs text-[#2D3A2D] space-y-1">
@@ -611,10 +722,104 @@ export const PlantDiagnosisModal: React.FC<PlantDiagnosisModalProps> = ({
           )}
 
           {/* ========================================================= */}
+          {/* VIEW D: INDISPONIBILIDADE TÉCNICA / ERRO (SEM LAUDO FAKE) */}
+          {/* ========================================================= */}
+          {errorState && !isLoading && !diagnosisResult && (
+            <div className="space-y-5 animate-fadeIn">
+              <div className="bg-white p-6 rounded-3xl border border-rose-200 shadow-sm space-y-4">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-11 h-11 rounded-2xl bg-rose-100 border border-rose-200 flex items-center justify-center shrink-0 text-rose-700">
+                    <AlertTriangle className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-md bg-rose-100 text-rose-800 border border-rose-200">
+                        Indisponibilidade Técnica
+                      </span>
+                      {errorState.httpStatus && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-stone-100 text-stone-700 border border-stone-200">
+                          HTTP {errorState.httpStatus} • {errorState.errorType}
+                        </span>
+                      )}
+                    </div>
+                    <h3 className="font-serif font-bold text-[#2D3A2D] text-lg">
+                      {getErrorHeading(errorState.errorType)}
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="bg-rose-50/70 border border-rose-200/80 rounded-2xl p-4 text-xs text-rose-950 space-y-1.5">
+                  <p className="font-bold">
+                    Nenhuma análise visual foi realizada e nenhum diagnóstico foi emitido.
+                  </p>
+                  <p className="text-rose-900 leading-relaxed">
+                    {errorState.message}
+                  </p>
+                </div>
+
+                <div className="bg-[#FAF8F5] border border-[#5A5A40]/20 rounded-2xl p-4 text-xs text-[#5A5A40] flex items-start gap-2">
+                  <Info className="w-4 h-4 text-[#A68069] shrink-0 mt-0.5" />
+                  <p>
+                    Suas {photoSlots.filter(Boolean).length} fotografia(s) e observações foram preservadas. Você pode tentar novamente agora mesmo ou ajustar as fotos antes de reenviar.
+                  </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center justify-end gap-2.5 pt-2 border-t border-[#5A5A40]/15">
+                  <button
+                    type="button"
+                    onClick={() => setErrorState(null)}
+                    className="w-full sm:w-auto px-4 py-2.5 rounded-2xl text-xs font-bold bg-white text-[#2D3A2D] border border-[#5A5A40]/30 hover:bg-stone-50 transition-colors cursor-pointer"
+                  >
+                    Voltar e Editar Fotos / Sintomas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRunDiagnosis}
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-2xl text-xs font-bold bg-[#2D3A2D] hover:bg-[#1a231a] text-[#F5F5F0] border border-[#D4AF37]/50 shadow-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <RefreshCw className="w-4 h-4 text-[#D4AF37]" />
+                    Tentar Novamente
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ========================================================= */}
           {/* VIEW C: RESULTADO DO DIAGNÓSTICO ESTRUTURADO (4 PILARES)  */}
           {/* ========================================================= */}
           {diagnosisResult && !isLoading && (
             <div className="space-y-6 animate-fadeIn">
+              {/* Banner diferenciando Diagnóstico Concluído vs Resultado Inconclusivo */}
+              {diagnosisResult.confidenceLevel === 'INCONCLUSIVA' ? (
+                <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex items-start gap-3 text-xs text-amber-950">
+                  <HelpCircle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-bold text-amber-900">
+                      Resultado Inconclusivo — Análise Visual Realizada pela IA
+                    </p>
+                    <p className="text-amber-900/90 leading-relaxed">
+                      As fotografias foram inspecionadas pelo modelo de visão, mas não houve evidência visual suficiente para confirmar uma causa única. Confira abaixo o que foi observado e o que verificar presencialmente ou envie fotos mais nítidas.
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3.5 flex items-start gap-3 text-xs text-emerald-950">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <p className="font-bold text-emerald-900">
+                      Diagnóstico Concluído — Análise Visual Realizada pela IA
+                    </p>
+                    <p className="text-emerald-800 text-[11px]">
+                      Laudo estruturado gerado a partir da inspeção real das fotografias enviadas
+                      {diagnosisMeta?.durationMs
+                        ? ` em ${(diagnosisMeta.durationMs / 1000).toFixed(1)}s.`
+                        : '.'}
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Card Resumo do Laudo */}
               <div className="bg-white p-5 sm:p-6 rounded-3xl border border-[#5A5A40]/30 shadow-sm space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#5A5A40]/15 pb-3">

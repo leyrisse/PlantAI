@@ -1,13 +1,29 @@
 import React from 'react';
 import { Plant, CareTaskType, WeatherLocation, CurrentWeather } from '../types';
 import { calculateNextCareDate } from '../utils/dateUtils';
-import { Calendar, Droplet, Sprout, Scissors, History, QrCode, Heart, ArrowRight, Sun, Info, CalendarHeart, MapPin, Compass } from 'lucide-react';
+import {
+  Calendar,
+  Droplet,
+  Sprout,
+  Scissors,
+  History,
+  QrCode,
+  Heart,
+  ArrowRight,
+  Sun,
+  Info,
+  CalendarHeart,
+  MapPin,
+  Compass,
+  Stethoscope,
+} from 'lucide-react';
 
 interface HomeModuleProps {
   plants: Plant[];
   onLogCareTask: (plantId: string, taskType: CareTaskType) => void;
   onSelectPlant: (plant: Plant) => void;
   onNavigateToCare: () => void;
+  onOpenDiagnosis?: () => void;
   userRole?: 'HOBBYIST' | 'PRO';
   location?: WeatherLocation | null;
   weather?: CurrentWeather | null;
@@ -20,6 +36,7 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
   onLogCareTask,
   onSelectPlant,
   onNavigateToCare,
+  onOpenDiagnosis,
   location,
   weather,
   isLoadingWeather = false,
@@ -111,6 +128,40 @@ export const HomeModule: React.FC<HomeModuleProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Atalho Destacado: Diagnosticar Planta Doente */}
+      {onOpenDiagnosis && (
+        <div className="bg-linear-to-r from-[#2D3A2D] via-[#354335] to-[#2D3A2D] rounded-3xl p-5 sm:p-6 text-[#F5F5F0] border border-[#D4AF37]/40 shadow-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5 animate-fadeIn">
+          <div className="flex items-start gap-4">
+            <div className="w-13 h-13 rounded-2xl bg-[#D4AF37]/20 border border-[#D4AF37]/50 flex items-center justify-center shrink-0 text-[#D4AF37] shadow-inner">
+              <Stethoscope className="w-7 h-7" />
+            </div>
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-wider bg-[#D4AF37] text-[#2D3A2D] px-2.5 py-0.5 rounded-full shadow-2xs">
+                  IA Fitossanitária
+                </span>
+                <span className="text-xs text-[#D4AF37] font-medium">Diagnóstico de Saúde</span>
+              </div>
+              <h3 className="font-serif text-lg sm:text-xl font-bold text-[#F5F5F0] leading-snug">
+                Diagnosticar planta doente
+              </h3>
+              <p className="text-xs text-[#F5F5F0]/80 max-w-xl leading-relaxed">
+                Sua planta apresenta manchas, folhas murchas, secas ou sinais de pragas? Envie até 3 fotografias e receba hipóteses diagnósticas e orientações com IA.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenDiagnosis}
+            className="w-full sm:w-auto px-5 py-3 bg-[#D4AF37] hover:bg-[#c29e2f] text-[#2D3A2D] font-bold text-xs rounded-2xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+          >
+            <Stethoscope className="w-4 h-4 text-[#2D3A2D]" />
+            <span>Diagnosticar com IA</span>
+          </button>
+        </div>
+      )}
 
       {/* Main Grid: Tasks + Nostalgia Memories */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
